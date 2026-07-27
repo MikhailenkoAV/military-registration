@@ -1,0 +1,1696 @@
+"use client";
+
+import { ChangeEvent, FormEvent, useEffect, useMemo, useRef, useState } from "react";
+import * as XLSX from "xlsx";
+import {
+  AlertCircle,
+  ArchiveRestore,
+  Bell,
+  BookOpen,
+  CalendarCheck,
+  Check,
+  ChevronDown,
+  ChevronRight,
+  CircleAlert,
+  Clock3,
+  Database,
+  Download,
+  FileDown,
+  FileSpreadsheet,
+  FileText,
+  Home,
+  Info,
+  ListChecks,
+  Menu,
+  Pencil,
+  Plus,
+  Printer,
+  RotateCcw,
+  Search,
+  Settings,
+  ShieldCheck,
+  Trash2,
+  Upload,
+  UserRound,
+  Users,
+  X,
+} from "lucide-react";
+
+type View =
+  | "dashboard"
+  | "employees"
+  | "notifications"
+  | "documents"
+  | "reconciliations"
+  | "settings";
+
+type Employee = {
+  id: string;
+  fullName: string;
+  lastName: string;
+  firstName: string;
+  middleName: string;
+  sex: "male" | "female";
+  active: boolean;
+  department: string;
+  position: string;
+  hireDate: string;
+  dismissalDate: string;
+  orderNumber: string;
+  orderDate: string;
+  birthDate: string;
+  birthPlace: string;
+  passportSeries: string;
+  passportNumber: string;
+  passportIssueDate: string;
+  passportIssuedBy: string;
+  registrationAddress: string;
+  registrationDate: string;
+  actualAddress: string;
+  actualAddressDate: string;
+  phone: string;
+  workPhone: string;
+  snils: string;
+  inn: string;
+  education: string;
+  profession: string;
+  languages: string;
+  driverLicense: string;
+  maritalStatus: string;
+  familyMembers: string;
+  militaryDocType: string;
+  militaryDocNumber: string;
+  militaryDocIssueDate: string;
+  militaryDocIssuedBy: string;
+  militaryRank: string;
+  composition: string;
+  profile: string;
+  vus: string;
+  reserveCategory: string;
+  fitnessCategory: string;
+  militaryCommissariat: string;
+  militaryCommissariatAddress: string;
+  accountType: "general" | "special" | "";
+  teamNumber: string;
+  specialAccountNumber: string;
+  lastEmployeeVerification: string;
+  lastCommissariatVerification: string;
+  notes: string;
+};
+
+type Notice = {
+  id: string;
+  employeeId: string;
+  ruleId: string;
+  eventDate: string;
+  dueDate: string;
+  createdAt: string;
+  completedAt: string;
+  outgoingNumber: string;
+  note: string;
+};
+
+type DocumentRecord = {
+  id: string;
+  employeeId: string;
+  type: "form10" | "f2";
+  createdAt: string;
+  title: string;
+};
+
+type OrganizationSettings = {
+  organizationName: string;
+  shortName: string;
+  organizationAddress: string;
+  directorPosition: string;
+  directorName: string;
+  responsiblePosition: string;
+  responsibleName: string;
+  defaultCommissariat: string;
+  defaultCommissariatAddress: string;
+  extraHolidays: string;
+};
+
+type StoredState = {
+  employees: Employee[];
+  notices: Notice[];
+  documents: DocumentRecord[];
+  settings: OrganizationSettings;
+};
+
+type Rule = {
+  id: string;
+  title: string;
+  shortTitle: string;
+  days: number | null;
+  workingDays: boolean;
+  source: string;
+  sourceUrl: string;
+  help: string;
+  documentHint: string;
+};
+
+const STORAGE_KEY = "voinskiy-uchet-v1";
+
+const RULES: Rule[] = [
+  {
+    id: "hire",
+    title: "Направить сведения о приёме",
+    shortTitle: "Приём сотрудника",
+    days: 5,
+    workingDays: false,
+    source: "Постановление Правительства РФ № 719, п. 32 «а»",
+    sourceUrl:
+      "https://www.consultant.ru/document/cons_doc_LAW_64215/674f7a847f97b0d98c437823abac7703aa4f5dee/",
+    help: "Сведения направляются в соответствующий военный комиссариат в течение 5 дней со дня приёма.",
+    documentHint: "Справка Ф-2 — сведения о приёме",
+  },
+  {
+    id: "dismissal",
+    title: "Направить сведения об увольнении",
+    shortTitle: "Увольнение сотрудника",
+    days: 5,
+    workingDays: false,
+    source: "Постановление Правительства РФ № 719, п. 32 «а»",
+    sourceUrl:
+      "https://www.consultant.ru/document/cons_doc_LAW_64215/674f7a847f97b0d98c437823abac7703aa4f5dee/",
+    help: "Сведения направляются в соответствующий военный комиссариат в течение 5 дней со дня увольнения.",
+    documentHint: "Справка Ф-2 — сведения об увольнении",
+  },
+  {
+    id: "change",
+    title: "Сообщить об изменении учётных сведений",
+    shortTitle: "Изменение сведений",
+    days: 5,
+    workingDays: false,
+    source: "Постановление Правительства РФ № 719, п. 32 «е»",
+    sourceUrl:
+      "https://www.consultant.ru/document/cons_doc_LAW_64215/674f7a847f97b0d98c437823abac7703aa4f5dee/",
+    help:
+      "Учитываются изменения семейного положения, образования, подразделения, должности, адреса и состояния здоровья.",
+    documentHint: "Сообщение об изменении сведений",
+  },
+  {
+    id: "unregistered",
+    title: "Сообщить о гражданине, не состоящем на учёте",
+    shortTitle: "Не состоит на учёте",
+    days: 3,
+    workingDays: true,
+    source: "Федеральный закон № 53-ФЗ, ст. 4",
+    sourceUrl:
+      "https://www.consultant.ru/document/cons_doc_LAW_18260/600d790053e43f565b39b6391205e2b91a2f8318/",
+    help:
+      "Сведения о выявленном гражданине, который обязан состоять на воинском учёте, направляются в течение 3 рабочих дней.",
+    documentHint: "Сообщение и направление для постановки на учёт",
+  },
+  {
+    id: "document_issue",
+    title: "Сообщить об ошибках в документах",
+    shortTitle: "Ошибка в документе",
+    days: 5,
+    workingDays: true,
+    source: "Постановление Правительства РФ № 719, п. 30 «г»",
+    sourceUrl:
+      "https://www.consultant.ru/document/cons_doc_LAW_64215/674f7a847f97b0d98c437823abac7703aa4f5dee/",
+    help:
+      "Сообщаются неоговорённые исправления, неточности, признаки подделки, неполные листы и нарушения обязанностей.",
+    documentHint: "Информационное письмо в военный комиссариат",
+  },
+  {
+    id: "request",
+    title: "Ответить на запрос военного комиссариата",
+    shortTitle: "Запрос военкомата",
+    days: 14,
+    workingDays: false,
+    source: "Постановление Правительства РФ № 719, п. 32 «б»",
+    sourceUrl:
+      "https://www.consultant.ru/document/cons_doc_LAW_64215/674f7a847f97b0d98c437823abac7703aa4f5dee/",
+    help: "Необходимые сведения по запросу направляются в двухнедельный срок.",
+    documentHint: "Ответ на запрос военного комиссариата",
+  },
+  {
+    id: "summons",
+    title: "Оповестить сотрудника о повестке",
+    shortTitle: "Получена повестка",
+    days: null,
+    workingDays: false,
+    source: "Федеральный закон № 53-ФЗ, ст. 4",
+    sourceUrl:
+      "https://www.consultant.ru/document/cons_doc_LAW_18260/600d790053e43f565b39b6391205e2b91a2f8318/",
+    help:
+      "Зафиксируйте дату поступления, дату явки, вручение или отказ от вручения и обеспечьте возможность своевременной явки.",
+    documentHint: "Журнал оповещения и отметка о вручении",
+  },
+  {
+    id: "employee_verification",
+    title: "Провести сверку с документами сотрудника",
+    shortTitle: "Сверка с сотрудником",
+    days: 365,
+    workingDays: false,
+    source: "Постановление Правительства РФ № 719, п. 32 «г»",
+    sourceUrl:
+      "https://www.consultant.ru/document/cons_doc_LAW_64215/674f7a847f97b0d98c437823abac7703aa4f5dee/",
+    help: "Сведения карточки сверяются с документами воинского учёта не реже одного раза в год.",
+    documentHint: "Отметка о сверке в Форме № 10",
+  },
+  {
+    id: "commissariat_verification",
+    title: "Провести сверку с военным комиссариатом",
+    shortTitle: "Сверка с военкоматом",
+    days: 365,
+    workingDays: false,
+    source: "Приказ Министра обороны РФ № 700, п. 36",
+    sourceUrl:
+      "https://www.consultant.ru/document/cons_doc_LAW_405064/0ae5a1ee2359bed35fbe57ae19c83c920095c8d4/",
+    help:
+      "Сверка карточек со сведениями военного комиссариата проводится не реже одного раза в год.",
+    documentHint: "Список для сверки и отметка в Форме № 10",
+  },
+];
+
+const emptySettings: OrganizationSettings = {
+  organizationName: "",
+  shortName: "",
+  organizationAddress: "",
+  directorPosition: "Генеральный директор",
+  directorName: "",
+  responsiblePosition: "Специалист по ведению воинского учёта",
+  responsibleName: "",
+  defaultCommissariat: "",
+  defaultCommissariatAddress: "",
+  extraHolidays: "",
+};
+
+const navItems: { id: View; label: string; icon: typeof Home }[] = [
+  { id: "dashboard", label: "Главная", icon: Home },
+  { id: "employees", label: "Сотрудники", icon: Users },
+  { id: "notifications", label: "Уведомления", icon: Bell },
+  { id: "documents", label: "Документы", icon: FileText },
+  { id: "reconciliations", label: "Сверки", icon: ListChecks },
+  { id: "settings", label: "Настройки", icon: Settings },
+];
+
+const requiredFields: { key: keyof Employee; label: string }[] = [
+  { key: "fullName", label: "Ф.И.О." },
+  { key: "birthDate", label: "дата рождения" },
+  { key: "birthPlace", label: "место рождения" },
+  { key: "passportSeries", label: "серия паспорта" },
+  { key: "passportNumber", label: "номер паспорта" },
+  { key: "registrationAddress", label: "адрес регистрации" },
+  { key: "militaryDocNumber", label: "документ воинского учёта" },
+  { key: "militaryRank", label: "воинское звание" },
+  { key: "composition", label: "состав" },
+  { key: "vus", label: "ВУС" },
+  { key: "reserveCategory", label: "категория запаса" },
+  { key: "fitnessCategory", label: "категория годности" },
+  { key: "militaryCommissariat", label: "военный комиссариат" },
+];
+
+const federalHolidays2026 = new Set([
+  "2026-01-01",
+  "2026-01-02",
+  "2026-01-03",
+  "2026-01-04",
+  "2026-01-05",
+  "2026-01-06",
+  "2026-01-07",
+  "2026-01-08",
+  "2026-01-09",
+  "2026-02-23",
+  "2026-03-09",
+  "2026-05-01",
+  "2026-05-11",
+  "2026-06-12",
+  "2026-11-04",
+  "2026-12-31",
+]);
+
+function makeId() {
+  return typeof crypto !== "undefined" && crypto.randomUUID
+    ? crypto.randomUUID()
+    : `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+}
+
+function todayIso() {
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(
+    d.getDate(),
+  ).padStart(2, "0")}`;
+}
+
+function emptyEmployee(settings: OrganizationSettings): Employee {
+  return {
+    id: makeId(),
+    fullName: "",
+    lastName: "",
+    firstName: "",
+    middleName: "",
+    sex: "male",
+    active: true,
+    department: "",
+    position: "",
+    hireDate: "",
+    dismissalDate: "",
+    orderNumber: "",
+    orderDate: "",
+    birthDate: "",
+    birthPlace: "",
+    passportSeries: "",
+    passportNumber: "",
+    passportIssueDate: "",
+    passportIssuedBy: "",
+    registrationAddress: "",
+    registrationDate: "",
+    actualAddress: "",
+    actualAddressDate: "",
+    phone: "",
+    workPhone: "",
+    snils: "",
+    inn: "",
+    education: "",
+    profession: "",
+    languages: "",
+    driverLicense: "",
+    maritalStatus: "",
+    familyMembers: "",
+    militaryDocType: "Военный билет",
+    militaryDocNumber: "",
+    militaryDocIssueDate: "",
+    militaryDocIssuedBy: "",
+    militaryRank: "",
+    composition: "",
+    profile: "",
+    vus: "",
+    reserveCategory: "",
+    fitnessCategory: "",
+    militaryCommissariat: settings.defaultCommissariat,
+    militaryCommissariatAddress: settings.defaultCommissariatAddress,
+    accountType: "",
+    teamNumber: "",
+    specialAccountNumber: "",
+    lastEmployeeVerification: "",
+    lastCommissariatVerification: "",
+    notes: "",
+  };
+}
+
+function parseLocalDate(value: string) {
+  if (!value) return null;
+  const [year, month, day] = value.split("-").map(Number);
+  if (!year || !month || !day) return null;
+  return new Date(year, month - 1, day);
+}
+
+function dateToIso(date: Date) {
+  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(
+    date.getDate(),
+  ).padStart(2, "0")}`;
+}
+
+function formatDate(value: string, fallback = "—") {
+  const date = parseLocalDate(value);
+  return date
+    ? new Intl.DateTimeFormat("ru-RU", { day: "2-digit", month: "2-digit", year: "numeric" }).format(
+        date,
+      )
+    : fallback;
+}
+
+function formatLongDate(date = new Date()) {
+  return new Intl.DateTimeFormat("ru-RU", {
+    day: "numeric",
+    month: "long",
+    year: "numeric",
+    weekday: "long",
+  }).format(date);
+}
+
+function cleanCell(value: unknown) {
+  if (value === null || value === undefined) return "";
+  const text = String(value).trim();
+  return text === "-" || text === "_" ? "" : text;
+}
+
+function excelDateToIso(value: unknown) {
+  if (!value) return "";
+  if (value instanceof Date && !Number.isNaN(value.getTime())) return dateToIso(value);
+  if (typeof value === "number") {
+    const parsed = XLSX.SSF.parse_date_code(value);
+    if (parsed) return `${parsed.y}-${String(parsed.m).padStart(2, "0")}-${String(parsed.d).padStart(2, "0")}`;
+  }
+  const text = cleanCell(value);
+  const match = text.match(/(\d{1,2})[.\-/](\d{1,2})[.\-/](\d{4})/);
+  if (match) return `${match[3]}-${match[2].padStart(2, "0")}-${match[1].padStart(2, "0")}`;
+  return "";
+}
+
+function splitName(fullName: string) {
+  const parts = fullName.trim().split(/\s+/);
+  return {
+    lastName: parts[0] ?? "",
+    firstName: parts[1] ?? "",
+    middleName: parts.slice(2).join(" "),
+  };
+}
+
+function addCalendarDays(value: string, days: number) {
+  const date = parseLocalDate(value) ?? new Date();
+  date.setDate(date.getDate() + days);
+  return dateToIso(date);
+}
+
+function addWorkingDays(value: string, days: number, extraHolidays: string) {
+  const date = parseLocalDate(value) ?? new Date();
+  const custom = new Set(
+    extraHolidays
+      .split(/[\s,;]+/)
+      .map((item) => item.trim())
+      .filter(Boolean),
+  );
+  let added = 0;
+  while (added < days) {
+    date.setDate(date.getDate() + 1);
+    const iso = dateToIso(date);
+    const weekday = date.getDay();
+    if (weekday !== 0 && weekday !== 6 && !federalHolidays2026.has(iso) && !custom.has(iso)) {
+      added += 1;
+    }
+  }
+  return dateToIso(date);
+}
+
+function dueForRule(rule: Rule, eventDate: string, settings: OrganizationSettings) {
+  if (rule.days === null) return eventDate;
+  return rule.workingDays
+    ? addWorkingDays(eventDate, rule.days, settings.extraHolidays)
+    : addCalendarDays(eventDate, rule.days);
+}
+
+function daysFromToday(value: string) {
+  const date = parseLocalDate(value);
+  const today = parseLocalDate(todayIso());
+  if (!date || !today) return null;
+  return Math.round((date.getTime() - today.getTime()) / 86400000);
+}
+
+function noticeStatus(notice: Notice) {
+  if (notice.completedAt) return "completed";
+  const days = daysFromToday(notice.dueDate);
+  if (days === null) return "upcoming";
+  if (days < 0) return "overdue";
+  if (days === 0) return "today";
+  return "upcoming";
+}
+
+function statusLabel(status: string, dueDate = "") {
+  if (status === "completed") return "Исполнено";
+  if (status === "overdue") return "Просрочено";
+  if (status === "today") return "Срок сегодня";
+  const days = daysFromToday(dueDate);
+  return days === 1 ? "1 день" : days && days > 1 ? `${days} дн.` : "Предстоит";
+}
+
+function getMissingFields(employee: Employee) {
+  return requiredFields.filter(({ key }) => !String(employee[key] ?? "").trim()).map(({ label }) => label);
+}
+
+function uniqueValues(employees: Employee[], key: keyof Employee) {
+  return Array.from(
+    new Set(employees.map((employee) => String(employee[key] ?? "").trim()).filter(Boolean)),
+  ).sort((a, b) => a.localeCompare(b, "ru"));
+}
+
+function htmlEscape(value: unknown) {
+  return String(value ?? "")
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;");
+}
+
+function documentShell(title: string, body: string) {
+  return `<!doctype html><html lang="ru"><head><meta charset="utf-8"><title>${htmlEscape(
+    title,
+  )}</title><style>
+  @page{size:A4;margin:0}
+  *{box-sizing:border-box}
+  html,body{margin:0;padding:0;background:#fff}
+  body{font-family:"Times New Roman",serif;color:#000}
+  .form-page{position:relative;width:210mm;height:297mm;overflow:hidden;break-after:page;page-break-after:always;background:#fff}
+  .form-page:last-child{break-after:auto;page-break-after:auto}
+  .form-template{position:absolute;z-index:0;inset:0;width:210mm;height:297mm;object-fit:fill}
+  .form-value{position:absolute;z-index:2;display:flex;align-items:center;justify-content:center;overflow:hidden;padding:0 .8mm;font-size:10pt;line-height:1.04;text-align:center;white-space:nowrap}
+  .form-value.cover{background:#fff}
+  .form-value.small{font-size:8pt}
+  .form-value.tiny{font-size:6.5pt}
+  .form-value.multiline{align-items:flex-start;padding-top:.8mm;white-space:normal;overflow-wrap:anywhere}
+  @media screen{body{width:210mm;margin:0 auto}}
+  @media print{html,body{width:210mm}.form-page{margin:0}}
+  </style></head><body>${body}</body></html>`;
+}
+
+function overlayValue(
+  value: unknown,
+  left: number,
+  top: number,
+  width: number,
+  height = 5,
+  className = "",
+) {
+  return `<span class="form-value ${className}" style="left:${left}mm;top:${top}mm;width:${width}mm;height:${height}mm">${htmlEscape(
+    value,
+  )}</span>`;
+}
+
+function familyRows(value: string) {
+  return value
+    .split(/\r?\n|;\s*/)
+    .map((item) => item.trim())
+    .filter(Boolean)
+    .slice(0, 4);
+}
+
+function buildForm10(employee: Employee, settings: OrganizationSettings, assetBase: string) {
+  const family = familyRows(employee.familyMembers);
+  const documentDetails = [
+    employee.militaryDocType,
+    employee.militaryDocNumber,
+    formatDate(employee.militaryDocIssueDate, ""),
+    employee.militaryDocIssuedBy,
+  ]
+    .filter(Boolean)
+    .join(", ");
+  return documentShell(
+    `Форма № 10 — ${employee.fullName}`,
+    `<section class="form-page" data-form-page="1">
+      <img class="form-template" src="${assetBase}/templates/form10-page-1.png" alt="">
+      ${overlayValue(settings.organizationName || "Акционерное общество Центр авиации «Солярис»", 19.6, 56.1, 176.1, 5.4, "cover")}
+      ${overlayValue(employee.lastName, 64.4, 91.5, 131.1)}
+      ${overlayValue(employee.firstName, 64.4, 98.4, 131.1)}
+      ${overlayValue(employee.middleName, 64.4, 105.3, 131.1)}
+      ${overlayValue(formatDate(employee.birthDate, ""), 64.4, 112.2, 50.3)}
+      ${overlayValue(employee.birthPlace, 64.4, 119.1, 131.1)}
+      ${overlayValue(employee.education, 64.4, 126.1, 50.3, 5, "small")}
+      ${overlayValue(employee.education, 64.7, 133.5, 50.1, 13.8, "small multiline")}
+      ${overlayValue(employee.profession, 64.4, 150.8, 64.4, 5, "small")}
+      ${overlayValue(employee.maritalStatus, 64.4, 158.8, 50.3)}
+      ${family.map((item, index) => overlayValue(item, 89.4, 166.3 + index * 7.5, 106.4, 4.9, "small")).join("")}
+      ${overlayValue(employee.languages, 64.4, 197.5, 131.1, 5, "small")}
+      ${overlayValue(employee.passportSeries, 64.4, 207.1, 21.1)}
+      ${overlayValue(employee.passportNumber, 89.4, 207.1, 50.4)}
+      ${overlayValue(formatDate(employee.passportIssueDate, ""), 143.6, 207.1, 52)}
+      ${overlayValue(employee.passportIssuedBy, 64.4, 215.4, 131.1, 5, "small")}
+      ${overlayValue(employee.driverLicense, 64.4, 223.1, 131.1, 5, "small")}
+      ${overlayValue(employee.registrationAddress, 64.4, 232.6, 81.1, 5, "small")}
+      ${overlayValue(formatDate(employee.registrationDate, ""), 150.4, 232.6, 45.2)}
+      ${overlayValue(employee.actualAddress, 64.4, 240.4, 81.1, 5, "small")}
+      ${overlayValue(formatDate(employee.actualAddressDate, ""), 150.4, 240.4, 45.2)}
+      ${overlayValue(employee.workPhone, 64.4, 248.5, 64.5)}
+      ${overlayValue(employee.phone, 132.5, 248.5, 63.1)}
+    </section>
+    <section class="form-page" data-form-page="2">
+      <img class="form-template" src="${assetBase}/templates/form10-page-2.png" alt="">
+      ${overlayValue(employee.reserveCategory, 55, 29.4, 37.6, 12.8, "multiline")}
+      ${overlayValue(employee.militaryRank, 55, 50.1, 37.6)}
+      ${overlayValue([employee.composition, employee.profile].filter(Boolean).join(" / "), 55, 57.6, 37.6, 9.5, "small multiline")}
+      ${overlayValue(employee.vus, 55, 69.8, 37.6)}
+      ${overlayValue(employee.fitnessCategory, 55, 89.1, 37.6)}
+      ${overlayValue(employee.militaryCommissariat, 146.4, 28.7, 44.2, 16.7, "small multiline")}
+      ${overlayValue(employee.accountType === "general" ? employee.teamNumber : "", 146.4, 62.1, 44.2)}
+      ${overlayValue(employee.accountType === "special" ? employee.specialAccountNumber : "", 146.4, 69.9, 44.2)}
+      ${overlayValue(documentDetails, 146.4, 84.1, 44.2, 13.8, "small multiline")}
+      ${overlayValue(employee.notes, 15, 118.2, 175, 17.2, "small multiline")}
+      ${overlayValue(`${formatDate(employee.orderDate, "")}${employee.orderNumber ? ` № ${employee.orderNumber}` : ""}`, 14.7, 165.2, 40.4, 5, "small")}
+      ${overlayValue(employee.position, 55.2, 165.2, 64.4, 5, "small")}
+      ${overlayValue(employee.militaryCommissariat, 119.7, 164.5, 36.7, 8.4, "tiny multiline")}
+      ${overlayValue(settings.responsiblePosition, 64.5, 196.8, 45, 8, "tiny multiline")}
+      ${overlayValue(settings.responsibleName, 153.6, 198.1, 37, 5, "tiny")}
+      ${overlayValue(employee.fullName, 153.6, 210.1, 37, 5, "tiny")}
+    </section>`,
+  );
+}
+
+function buildF2(
+  employee: Employee,
+  settings: OrganizationSettings,
+  eventType: "hire" | "dismissal",
+  assetBase: string,
+) {
+  return documentShell(
+    `Справка Ф-2 — ${employee.fullName}`,
+    `<section class="form-page" data-form-page="1">
+      <img class="form-template" src="${assetBase}/templates/f2-page-1.png" alt="">
+      ${overlayValue(`Военному комиссару (руководителю)\n${employee.militaryCommissariat || settings.defaultCommissariat}`, 105, 26, 96, 25, "cover small multiline")}
+      ${overlayValue(employee.fullName, 68.2, 118.5, 124.8, 5.6, "cover")}
+      ${overlayValue(employee.militaryRank, 108.2, 129.4, 84.8, 5.3, "cover")}
+      ${overlayValue(formatDate(employee.birthDate, ""), 20.1, 136.4, 72, 5.3, "cover")}
+      ${overlayValue(`${employee.passportSeries} ${employee.passportNumber}`, 110, 136.4, 83, 5.3, "cover")}
+      ${overlayValue(employee.snils, 113.7, 142.1, 79.3, 5.3, "cover")}
+      ${overlayValue(employee.registrationAddress, 45.2, 147.7, 147.8, 5.5, "cover small")}
+      ${overlayValue(eventType === "hire" ? "принят (поступил) на работу" : "уволен с работы", 20, 152.2, 175, 6.2, "cover")}
+      ${overlayValue(employee.position, 20, 191.3, 175, 5.5, "cover")}
+      ${overlayValue(employee.orderNumber, 92, 204.3, 36, 5.5, "cover")}
+      ${overlayValue(formatDate(employee.orderDate, ""), 139, 204.3, 52, 5.5, "cover")}
+    </section>`,
+  );
+}
+
+async function inlineTemplateImages(html: string) {
+  const urls = Array.from(
+    new Set(Array.from(html.matchAll(/src="([^"]+\/templates\/[^"]+\.png)"/g), (match) => match[1])),
+  );
+  let inlined = html;
+  for (const url of urls) {
+    const response = await fetch(url);
+    if (!response.ok) throw new Error(`Не удалось загрузить шаблон: ${url}`);
+    const blob = await response.blob();
+    const dataUrl = await new Promise<string>((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(String(reader.result));
+      reader.onerror = () => reject(reader.error);
+      reader.readAsDataURL(blob);
+    });
+    inlined = inlined.replaceAll(url, dataUrl);
+  }
+  return inlined;
+}
+
+function Field({
+  label,
+  value,
+  onChange,
+  type = "text",
+  placeholder,
+  help,
+  required,
+}: {
+  label: string;
+  value: string;
+  onChange: (value: string) => void;
+  type?: string;
+  placeholder?: string;
+  help?: string;
+  required?: boolean;
+}) {
+  return (
+    <label className="field">
+      <span>
+        {label}
+        {required ? " *" : ""}
+        {help ? <span className="field-help" aria-label={help} title={help}><Info size={14} /></span> : null}
+      </span>
+      <input
+        type={type}
+        value={value}
+        placeholder={placeholder}
+        onChange={(event) => onChange(event.target.value)}
+      />
+    </label>
+  );
+}
+
+export default function HomePage() {
+  const [view, setView] = useState<View>("dashboard");
+  const [menuOpen, setMenuOpen] = useState(false);
+  const [hydrated, setHydrated] = useState(false);
+  const [employees, setEmployees] = useState<Employee[]>([]);
+  const [notices, setNotices] = useState<Notice[]>([]);
+  const [documents, setDocuments] = useState<DocumentRecord[]>([]);
+  const [organization, setOrganization] = useState<OrganizationSettings>(emptySettings);
+  const [employeeModal, setEmployeeModal] = useState<Employee | null>(null);
+  const [eventModal, setEventModal] = useState(false);
+  const [importPreview, setImportPreview] = useState<{
+    filename: string;
+    employees: Employee[];
+    warnings: string[];
+  } | null>(null);
+  const [toast, setToast] = useState("");
+  const [employeeSearch, setEmployeeSearch] = useState("");
+  const [departmentFilter, setDepartmentFilter] = useState("");
+  const [commissariatFilter, setCommissariatFilter] = useState("");
+  const [accountFilter, setAccountFilter] = useState("");
+  const [attentionFilter, setAttentionFilter] = useState("");
+  const [activeFilter, setActiveFilter] = useState("active");
+  const [sortField, setSortField] = useState<keyof Employee>("fullName");
+  const [sortDirection, setSortDirection] = useState<"asc" | "desc">("asc");
+  const [noticeSearch, setNoticeSearch] = useState("");
+  const [noticeFilter, setNoticeFilter] = useState("open");
+  const [documentEmployeeId, setDocumentEmployeeId] = useState("");
+  const [documentType, setDocumentType] = useState<"form10" | "f2">("form10");
+  const [f2Event, setF2Event] = useState<"hire" | "dismissal">("hire");
+  const [reconciliationSearch, setReconciliationSearch] = useState("");
+  const [reconciliationFilter, setReconciliationFilter] = useState("attention");
+  const excelInput = useRef<HTMLInputElement>(null);
+  const backupInput = useRef<HTMLInputElement>(null);
+
+  const [eventDraft, setEventDraft] = useState({
+    employeeId: "",
+    ruleId: "hire",
+    eventDate: todayIso(),
+    dueDate: "",
+    note: "",
+  });
+
+  /* Local storage is the application's external persistence layer. Loading it
+     once after mount intentionally hydrates all four related state slices. */
+  /* eslint-disable react-hooks/set-state-in-effect */
+  useEffect(() => {
+    try {
+      const raw = localStorage.getItem(STORAGE_KEY);
+      if (raw) {
+        const stored = JSON.parse(raw) as Partial<StoredState>;
+        setEmployees(Array.isArray(stored.employees) ? stored.employees : []);
+        setNotices(Array.isArray(stored.notices) ? stored.notices : []);
+        setDocuments(Array.isArray(stored.documents) ? stored.documents : []);
+        setOrganization({ ...emptySettings, ...(stored.settings ?? {}) });
+      }
+    } catch {
+      setToast("Не удалось прочитать сохранённые данные. Можно восстановить резервную копию.");
+    } finally {
+      setHydrated(true);
+    }
+  }, []);
+  /* eslint-enable react-hooks/set-state-in-effect */
+
+  useEffect(() => {
+    if (!hydrated) return;
+    const state: StoredState = { employees, notices, documents, settings: organization };
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+  }, [employees, notices, documents, organization, hydrated]);
+
+  useEffect(() => {
+    if (!toast) return;
+    const timer = window.setTimeout(() => setToast(""), 3800);
+    return () => window.clearTimeout(timer);
+  }, [toast]);
+
+  const pendingNotices = useMemo(
+    () => notices.filter((notice) => !notice.completedAt),
+    [notices],
+  );
+  const incompleteEmployees = useMemo(
+    () => employees.filter((employee) => employee.active && getMissingFields(employee).length > 0),
+    [employees],
+  );
+  const overdueCount = pendingNotices.filter((notice) => noticeStatus(notice) === "overdue").length;
+  const todayCount = pendingNotices.filter((notice) => noticeStatus(notice) === "today").length;
+  const attentionCount = pendingNotices.length + incompleteEmployees.length;
+
+  const filteredEmployees = useMemo(() => {
+    const search = employeeSearch.trim().toLowerCase();
+    return employees
+      .filter((employee) => {
+        if (activeFilter === "active" && !employee.active) return false;
+        if (activeFilter === "dismissed" && employee.active) return false;
+        if (departmentFilter && employee.department !== departmentFilter) return false;
+        if (commissariatFilter && employee.militaryCommissariat !== commissariatFilter) return false;
+        if (accountFilter && employee.accountType !== accountFilter) return false;
+        if (attentionFilter === "missing" && getMissingFields(employee).length === 0) return false;
+        if (
+          search &&
+          ![
+            employee.fullName,
+            employee.snils,
+            employee.passportSeries,
+            employee.passportNumber,
+            employee.vus,
+          ]
+            .join(" ")
+            .toLowerCase()
+            .includes(search)
+        )
+          return false;
+        return true;
+      })
+      .sort((a, b) => {
+        const left = String(a[sortField] ?? "");
+        const right = String(b[sortField] ?? "");
+        const result = left.localeCompare(right, "ru", { numeric: true });
+        return sortDirection === "asc" ? result : -result;
+      });
+  }, [
+    employees,
+    employeeSearch,
+    activeFilter,
+    departmentFilter,
+    commissariatFilter,
+    accountFilter,
+    attentionFilter,
+    sortField,
+    sortDirection,
+  ]);
+
+  const filteredNotices = useMemo(() => {
+    const search = noticeSearch.trim().toLowerCase();
+    return notices
+      .filter((notice) => {
+        const employee = employees.find((item) => item.id === notice.employeeId);
+        const rule = RULES.find((item) => item.id === notice.ruleId);
+        const status = noticeStatus(notice);
+        if (noticeFilter === "open" && status === "completed") return false;
+        if (noticeFilter !== "all" && noticeFilter !== "open" && status !== noticeFilter) return false;
+        if (search && !`${employee?.fullName ?? ""} ${rule?.title ?? ""}`.toLowerCase().includes(search))
+          return false;
+        return true;
+      })
+      .sort((a, b) => {
+        if (a.completedAt && !b.completedAt) return 1;
+        if (!a.completedAt && b.completedAt) return -1;
+        return a.dueDate.localeCompare(b.dueDate);
+      });
+  }, [notices, employees, noticeSearch, noticeFilter]);
+
+  const dashboardItems = useMemo(() => {
+    const legal = pendingNotices
+      .map((notice) => ({
+        id: notice.id,
+        employee: employees.find((employee) => employee.id === notice.employeeId),
+        title: RULES.find((rule) => rule.id === notice.ruleId)?.title ?? "Задача",
+        dueDate: notice.dueDate,
+        status: noticeStatus(notice),
+        type: "notice" as const,
+      }))
+      .sort((a, b) => a.dueDate.localeCompare(b.dueDate));
+    const completeness = incompleteEmployees.map((employee) => ({
+      id: `missing-${employee.id}`,
+      employee,
+      title: `Заполнить карточку: отсутствует ${getMissingFields(employee).slice(0, 2).join(", ")}`,
+      dueDate: "",
+      status: "missing",
+      type: "missing" as const,
+    }));
+    return [...legal, ...completeness].slice(0, 10);
+  }, [pendingNotices, employees, incompleteEmployees]);
+
+  function navigate(next: View) {
+    setView(next);
+    setMenuOpen(false);
+  }
+
+  function openNewEmployee() {
+    setEmployeeModal(emptyEmployee(organization));
+  }
+
+  function saveEmployee(event: FormEvent) {
+    event.preventDefault();
+    if (!employeeModal?.fullName.trim()) {
+      setToast("Укажите Ф.И.О. сотрудника.");
+      return;
+    }
+    const parts = splitName(employeeModal.fullName);
+    const saved = { ...employeeModal, ...parts };
+    setEmployees((current) => {
+      const exists = current.some((employee) => employee.id === saved.id);
+      return exists
+        ? current.map((employee) => (employee.id === saved.id ? saved : employee))
+        : [saved, ...current];
+    });
+    setEmployeeModal(null);
+    setToast("Карточка сотрудника сохранена.");
+  }
+
+  function deleteEmployee(employee: Employee) {
+    if (!window.confirm(`Удалить карточку «${employee.fullName}» и связанные задачи?`)) return;
+    setEmployees((current) => current.filter((item) => item.id !== employee.id));
+    setNotices((current) => current.filter((notice) => notice.employeeId !== employee.id));
+    setDocuments((current) => current.filter((document) => document.employeeId !== employee.id));
+    setEmployeeModal(null);
+    setToast("Карточка удалена.");
+  }
+
+  function toggleSort(field: keyof Employee) {
+    if (sortField === field) setSortDirection((current) => (current === "asc" ? "desc" : "asc"));
+    else {
+      setSortField(field);
+      setSortDirection("asc");
+    }
+  }
+
+  function resetEmployeeFilters() {
+    setEmployeeSearch("");
+    setDepartmentFilter("");
+    setCommissariatFilter("");
+    setAccountFilter("");
+    setAttentionFilter("");
+    setActiveFilter("active");
+  }
+
+  function rowValue(row: Record<string, unknown>, ...needles: string[]) {
+    const entries = Object.entries(row);
+    const match = entries.find(([key]) => {
+      const normalized = key.toLowerCase().replaceAll("ё", "е").trim();
+      return needles.some((needle) => normalized.includes(needle));
+    });
+    return match?.[1];
+  }
+
+  function mapExcelRow(row: Record<string, unknown>) {
+    const fullName = cleanCell(rowValue(row, "фамилия, имя", "фио", "ф.и.о"));
+    if (!fullName) return null;
+    const name = splitName(fullName);
+    const orderText = cleanCell(rowValue(row, "приказ о приеме", "приказ о приёме"));
+    const orderNumber = orderText.match(/№\s*([^\s]+)/)?.[1] ?? "";
+    const orderDate = excelDateToIso(orderText);
+    const passport = cleanCell(rowValue(row, "паспорт"));
+    const passportMatch = passport.match(/(\d{4})\s+(\d{6})/);
+    const militaryDoc = cleanCell(rowValue(row, "военный билет"));
+    return {
+      ...emptyEmployee(organization),
+      ...name,
+      fullName,
+      department: cleanCell(rowValue(row, "подразделение")),
+      position: cleanCell(rowValue(row, "должность")),
+      orderNumber,
+      orderDate,
+      hireDate: orderDate,
+      birthDate: excelDateToIso(rowValue(row, "дата рождения")),
+      birthPlace: cleanCell(rowValue(row, "место рождения")),
+      passportSeries: passportMatch?.[1] ?? "",
+      passportNumber: passportMatch?.[2] ?? "",
+      passportIssueDate: excelDateToIso(passport.replace(passportMatch?.[0] ?? "", "")),
+      passportIssuedBy: passport
+        .replace(passportMatch?.[0] ?? "", "")
+        .replace(/\bот\b\s*\d{1,2}[.\-/]\d{1,2}[.\-/]\d{4}/i, "")
+        .trim(),
+      registrationAddress: cleanCell(rowValue(row, "прописка", "адрес регистрации")),
+      militaryDocNumber: militaryDoc,
+      militaryRank: cleanCell(rowValue(row, "звание")),
+      composition: cleanCell(rowValue(row, "состав")),
+      vus: cleanCell(rowValue(row, "вус")),
+      profile: cleanCell(rowValue(row, "профиль")),
+      reserveCategory: cleanCell(rowValue(row, "запас")),
+      fitnessCategory: cleanCell(rowValue(row, "категория годности")),
+      militaryCommissariat: cleanCell(rowValue(row, "военный комиссариат")),
+      militaryCommissariatAddress: cleanCell(rowValue(row, "адрес вк")),
+      inn: cleanCell(rowValue(row, "инн")),
+      snils: cleanCell(rowValue(row, "снилс")),
+      maritalStatus: cleanCell(rowValue(row, "семейное")),
+      familyMembers: cleanCell(rowValue(row, "дети", "состав семьи")),
+    } satisfies Employee;
+  }
+
+  async function importExcel(event: ChangeEvent<HTMLInputElement>) {
+    const file = event.target.files?.[0];
+    event.target.value = "";
+    if (!file) return;
+    try {
+      const workbook = XLSX.read(await file.arrayBuffer(), { type: "array", cellDates: true });
+      const sheet = workbook.Sheets[workbook.SheetNames[0]];
+      const rows = XLSX.utils.sheet_to_json<Record<string, unknown>>(sheet, { defval: "" });
+      const mapped = rows.map(mapExcelRow).filter((item): item is Employee => Boolean(item));
+      if (!mapped.length) {
+        setToast("В таблице не найден столбец с Ф.И.О. сотрудников.");
+        return;
+      }
+      const warnings: string[] = [];
+      const incomplete = mapped.filter((employee) => getMissingFields(employee).length > 0).length;
+      if (incomplete) warnings.push(`Неполные карточки: ${incomplete}`);
+      const duplicateNames = mapped.length - new Set(mapped.map((item) => `${item.fullName}|${item.birthDate}`)).size;
+      if (duplicateNames) warnings.push(`Повторы внутри файла: ${duplicateNames}`);
+      setImportPreview({ filename: file.name, employees: mapped, warnings });
+    } catch {
+      setToast("Не удалось прочитать файл. Используйте XLSX, XLS или CSV.");
+    }
+  }
+
+  function commitImport(mode: "merge" | "replace") {
+    if (!importPreview) return;
+    if (mode === "replace") {
+      setEmployees(importPreview.employees);
+      setNotices([]);
+      setDocuments([]);
+    } else {
+      setEmployees((current) => {
+        const next = [...current];
+        importPreview.employees.forEach((incoming) => {
+          const index = next.findIndex(
+            (employee) =>
+              (incoming.snils && employee.snils === incoming.snils) ||
+              (employee.fullName.toLowerCase() === incoming.fullName.toLowerCase() &&
+                employee.birthDate === incoming.birthDate),
+          );
+          if (index >= 0) next[index] = { ...next[index], ...incoming, id: next[index].id };
+          else next.push(incoming);
+        });
+        return next;
+      });
+    }
+    setToast(`Импортировано карточек: ${importPreview.employees.length}. Исторические уведомления не создавались.`);
+    setImportPreview(null);
+    setView("employees");
+  }
+
+  function openEventModal(employeeId = "", ruleId = "hire") {
+    const rule = RULES.find((item) => item.id === ruleId) ?? RULES[0];
+    const eventDate = todayIso();
+    setEventDraft({
+      employeeId: employeeId || employees[0]?.id || "",
+      ruleId: rule.id,
+      eventDate,
+      dueDate: dueForRule(rule, eventDate, organization),
+      note: "",
+    });
+    setEventModal(true);
+  }
+
+  function changeEventRule(ruleId: string) {
+    const rule = RULES.find((item) => item.id === ruleId) ?? RULES[0];
+    setEventDraft((current) => ({
+      ...current,
+      ruleId,
+      dueDate: dueForRule(rule, current.eventDate, organization),
+    }));
+  }
+
+  function changeEventDate(eventDate: string) {
+    const rule = RULES.find((item) => item.id === eventDraft.ruleId) ?? RULES[0];
+    setEventDraft((current) => ({
+      ...current,
+      eventDate,
+      dueDate: dueForRule(rule, eventDate, organization),
+    }));
+  }
+
+  function saveEvent(event: FormEvent) {
+    event.preventDefault();
+    if (!eventDraft.employeeId || !eventDraft.eventDate || !eventDraft.dueDate) {
+      setToast("Укажите сотрудника, дату события и срок.");
+      return;
+    }
+    const notice: Notice = {
+      id: makeId(),
+      ...eventDraft,
+      createdAt: new Date().toISOString(),
+      completedAt: "",
+      outgoingNumber: "",
+    };
+    setNotices((current) => [notice, ...current]);
+    if (eventDraft.ruleId === "hire") {
+      setEmployees((current) =>
+        current.map((employee) =>
+          employee.id === eventDraft.employeeId
+            ? { ...employee, active: true, hireDate: eventDraft.eventDate }
+            : employee,
+        ),
+      );
+    }
+    if (eventDraft.ruleId === "dismissal") {
+      setEmployees((current) =>
+        current.map((employee) =>
+          employee.id === eventDraft.employeeId
+            ? { ...employee, active: false, dismissalDate: eventDraft.eventDate }
+            : employee,
+        ),
+      );
+    }
+    setEventModal(false);
+    setToast("Задача создана, срок рассчитан.");
+  }
+
+  function completeNotice(notice: Notice) {
+    const number = window.prompt("Исходящий номер или примечание об исполнении:", notice.outgoingNumber);
+    if (number === null) return;
+    setNotices((current) =>
+      current.map((item) =>
+        item.id === notice.id
+          ? { ...item, completedAt: new Date().toISOString(), outgoingNumber: number }
+          : item,
+      ),
+    );
+    setToast("Задача отмечена исполненной.");
+  }
+
+  function reopenNotice(notice: Notice) {
+    setNotices((current) =>
+      current.map((item) =>
+        item.id === notice.id ? { ...item, completedAt: "", outgoingNumber: "" } : item,
+      ),
+    );
+  }
+
+  function recordDocument(employee: Employee, type: "form10" | "f2") {
+    setDocuments((current) => [
+      {
+        id: makeId(),
+        employeeId: employee.id,
+        type,
+        createdAt: new Date().toISOString(),
+        title: type === "form10" ? "Форма № 10" : `Справка Ф-2 — ${f2Event === "hire" ? "приём" : "увольнение"}`,
+      },
+      ...current,
+    ]);
+  }
+
+  function currentDocument() {
+    const employee = employees.find((item) => item.id === documentEmployeeId);
+    if (!employee) return null;
+    const assetBase = window.location.origin;
+    return {
+      employee,
+      html:
+        documentType === "form10"
+          ? buildForm10(employee, organization, assetBase)
+          : buildF2(employee, organization, f2Event, assetBase),
+    };
+  }
+
+  function printDocument() {
+    const document = currentDocument();
+    if (!document) {
+      setToast("Выберите сотрудника.");
+      return;
+    }
+    const popup = window.open("", "_blank");
+    if (!popup) {
+      setToast("Браузер заблокировал окно печати.");
+      return;
+    }
+    popup.opener = null;
+    popup.document.open();
+    popup.document.write(document.html);
+    popup.document.close();
+    popup.focus();
+    window.setTimeout(() => popup.print(), 250);
+    recordDocument(document.employee, documentType);
+  }
+
+  async function downloadWord() {
+    const document = currentDocument();
+    if (!document) {
+      setToast("Выберите сотрудника.");
+      return;
+    }
+    let selfContainedHtml = document.html;
+    try {
+      selfContainedHtml = await inlineTemplateImages(document.html);
+    } catch {
+      setToast("Не удалось встроить шаблон в Word. Повторите попытку.");
+      return;
+    }
+    const blob = new Blob(["\ufeff", selfContainedHtml], { type: "application/msword;charset=utf-8" });
+    const link = window.document.createElement("a");
+    link.href = URL.createObjectURL(blob);
+    link.download = `${documentType === "form10" ? "Форма-10" : "Справка-Ф-2"}_${document.employee.fullName.replaceAll(
+      " ",
+      "_",
+    )}.doc`;
+    window.document.body.appendChild(link);
+    link.click();
+    link.remove();
+    window.setTimeout(() => URL.revokeObjectURL(link.href), 1500);
+    recordDocument(document.employee, documentType);
+    setToast("Документ Word подготовлен.");
+  }
+
+  function updateVerification(employee: Employee, type: "employee" | "commissariat") {
+    const promptTitle =
+      type === "employee" ? "Дата сверки с документами сотрудника:" : "Дата сверки с военным комиссариатом:";
+    const date = window.prompt(
+      promptTitle,
+      type === "employee"
+        ? employee.lastEmployeeVerification || todayIso()
+        : employee.lastCommissariatVerification || todayIso(),
+    );
+    if (!date) return;
+    setEmployees((current) =>
+      current.map((item) =>
+        item.id === employee.id
+          ? {
+              ...item,
+              [type === "employee" ? "lastEmployeeVerification" : "lastCommissariatVerification"]:
+                date,
+            }
+          : item,
+      ),
+    );
+    setToast("Дата сверки сохранена. Следующий срок рассчитан на год вперёд.");
+  }
+
+  function exportBackup() {
+    const state: StoredState = { employees, notices, documents, settings: organization };
+    const blob = new Blob([JSON.stringify(state, null, 2)], { type: "application/json" });
+    const link = window.document.createElement("a");
+    link.href = URL.createObjectURL(blob);
+    link.download = `voinskiy-uchet-backup-${todayIso()}.json`;
+    link.click();
+    URL.revokeObjectURL(link.href);
+    setToast("Резервная копия создана.");
+  }
+
+  async function restoreBackup(event: ChangeEvent<HTMLInputElement>) {
+    const file = event.target.files?.[0];
+    event.target.value = "";
+    if (!file) return;
+    try {
+      const data = JSON.parse(await file.text()) as StoredState;
+      if (!Array.isArray(data.employees) || !Array.isArray(data.notices)) throw new Error();
+      if (!window.confirm("Заменить текущие данные содержимым резервной копии?")) return;
+      setEmployees(data.employees);
+      setNotices(data.notices);
+      setDocuments(Array.isArray(data.documents) ? data.documents : []);
+      setOrganization({ ...emptySettings, ...(data.settings ?? {}) });
+      setToast("Резервная копия восстановлена.");
+    } catch {
+      setToast("Файл не является корректной резервной копией.");
+    }
+  }
+
+  function clearAllData() {
+    if (!window.confirm("Удалить все карточки, задачи, документы и настройки с этого устройства?")) return;
+    if (!window.confirm("Действие необратимо без резервной копии. Продолжить?")) return;
+    setEmployees([]);
+    setNotices([]);
+    setDocuments([]);
+    setOrganization(emptySettings);
+    localStorage.removeItem(STORAGE_KEY);
+    setToast("Все локальные данные удалены.");
+  }
+
+  const pageTitle =
+    navItems.find((item) => item.id === view)?.label ?? "Воинский учёт";
+
+  if (!hydrated) {
+    return (
+      <main className="loading-screen">
+        <ShieldCheck size={34} />
+        <p>Открываем рабочий контур…</p>
+      </main>
+    );
+  }
+
+  return (
+    <div className="app-shell">
+      <aside className={`sidebar ${menuOpen ? "is-open" : ""}`}>
+        <button className="sidebar-close icon-button" onClick={() => setMenuOpen(false)} aria-label="Закрыть меню">
+          <X size={20} />
+        </button>
+        <div className="brand">
+          <div className="brand-mark">
+            <ShieldCheck size={21} />
+          </div>
+          <div>
+            <strong>ВОИНСКИЙ УЧЁТ</strong>
+            <span>рабочий контур</span>
+          </div>
+        </div>
+        <nav aria-label="Основная навигация">
+          {navItems.map((item) => {
+            const Icon = item.icon;
+            return (
+              <button
+                key={item.id}
+                className={view === item.id ? "active" : ""}
+                onClick={() => navigate(item.id)}
+              >
+                <Icon size={21} />
+                <span>{item.label}</span>
+                {item.id === "notifications" && pendingNotices.length ? (
+                  <b>{pendingNotices.length}</b>
+                ) : null}
+              </button>
+            );
+          })}
+        </nav>
+        <div className="sidebar-foot">
+          <Database size={17} />
+          <div>
+            <strong>Данные на устройстве</strong>
+            <span>Сохранение автоматическое</span>
+          </div>
+        </div>
+      </aside>
+
+      {menuOpen ? <button className="sidebar-scrim" aria-label="Закрыть меню" onClick={() => setMenuOpen(false)} /> : null}
+
+      <main className="workspace">
+        <header className="topbar">
+          <div className="topbar-title">
+            <button className="mobile-menu icon-button" onClick={() => setMenuOpen(true)} aria-label="Открыть меню">
+              <Menu size={22} />
+            </button>
+            <div>
+              <span>{formatLongDate()}</span>
+              <h1>{pageTitle}</h1>
+            </div>
+          </div>
+          <div className="topbar-actions">
+            <input
+              ref={excelInput}
+              hidden
+              type="file"
+              accept=".xlsx,.xls,.csv"
+              onChange={importExcel}
+            />
+            <button className="button secondary" onClick={() => excelInput.current?.click()}>
+              <Upload size={18} /> Импорт Excel
+            </button>
+            <button className="button primary" onClick={openNewEmployee}>
+              <Plus size={18} /> Добавить сотрудника
+            </button>
+          </div>
+        </header>
+
+        <div className="content">
+          {view === "dashboard" ? (
+            <>
+              <section className="kpi-grid" aria-label="Основные показатели">
+                <button className="kpi-card" onClick={() => navigate("employees")}>
+                  <span className="kpi-icon teal"><Users size={25} /></span>
+                  <span><small>Всего сотрудников</small><strong>{employees.length}</strong></span>
+                  <ChevronRight size={18} />
+                </button>
+                <button className="kpi-card" onClick={() => navigate("notifications")}>
+                  <span className="kpi-icon amber"><CircleAlert size={25} /></span>
+                  <span><small>Требует внимания</small><strong>{attentionCount}</strong></span>
+                  <ChevronRight size={18} />
+                </button>
+                <button className="kpi-card" onClick={() => { setNoticeFilter("today"); navigate("notifications"); }}>
+                  <span className="kpi-icon blue"><CalendarCheck size={25} /></span>
+                  <span><small>Срок сегодня</small><strong>{todayCount}</strong></span>
+                  <ChevronRight size={18} />
+                </button>
+                <button className="kpi-card" onClick={() => { setNoticeFilter("overdue"); navigate("notifications"); }}>
+                  <span className="kpi-icon red"><Clock3 size={25} /></span>
+                  <span><small>Просрочено</small><strong>{overdueCount}</strong></span>
+                  <ChevronRight size={18} />
+                </button>
+              </section>
+
+              <section className="section-heading">
+                <div>
+                  <span className="eyebrow">Контроль сроков</span>
+                  <h2>Требует внимания</h2>
+                </div>
+                <div className="heading-actions">
+                  <button className="button secondary small" onClick={() => openEventModal()}>
+                    <Plus size={16} /> Создать задачу
+                  </button>
+                  <button className="button ghost small" onClick={() => navigate("notifications")}>
+                    Показать все <ChevronRight size={16} />
+                  </button>
+                </div>
+              </section>
+
+              {dashboardItems.length ? (
+                <div className="data-panel task-list">
+                  <div className="task-head">
+                    <span>Сотрудник</span><span>Задача</span><span>Срок</span><span>Статус</span>
+                  </div>
+                  {dashboardItems.map((item) => (
+                    <button
+                      className="task-row"
+                      key={item.id}
+                      onClick={() =>
+                        item.type === "missing" && item.employee
+                          ? setEmployeeModal(item.employee)
+                          : navigate("notifications")
+                      }
+                    >
+                      <span className="employee-cell">
+                        <span className="avatar"><UserRound size={18} /></span>
+                        <span><strong>{item.employee?.fullName ?? "Общая задача"}</strong><small>{item.employee?.department || "Подразделение не указано"}</small></span>
+                      </span>
+                      <span>{item.title}</span>
+                      <span>{item.dueDate ? formatDate(item.dueDate) : "Без срока"}</span>
+                      <span><b className={`status ${item.status}`}>{item.status === "missing" ? "Неполная карточка" : statusLabel(item.status, item.dueDate)}</b></span>
+                    </button>
+                  ))}
+                </div>
+              ) : (
+                <div className="empty-state">
+                  <ShieldCheck size={36} />
+                  <h3>{employees.length ? "Срочных задач нет" : "Начните с импорта реестра"}</h3>
+                  <p>{employees.length ? "Карточки заполнены, открытые законодательные сроки отсутствуют." : "Загрузите исходный Excel — файл будет обработан только в вашем браузере."}</p>
+                  <div>
+                    <button className="button primary" onClick={() => excelInput.current?.click()}><FileSpreadsheet size={18} /> Импортировать Excel</button>
+                    <button className="button secondary" onClick={openNewEmployee}><Plus size={18} /> Добавить вручную</button>
+                  </div>
+                </div>
+              )}
+            </>
+          ) : null}
+
+          {view === "employees" ? (
+            <>
+              <section className="section-heading compact">
+                <div><span className="eyebrow">Личный состав</span><h2>Реестр сотрудников</h2><p>Показано {filteredEmployees.length} из {employees.length}</p></div>
+                <button className="button secondary small" onClick={resetEmployeeFilters}><RotateCcw size={15} /> Сбросить фильтры</button>
+              </section>
+              <div className="filter-panel">
+                <label className="search-box"><Search size={18} /><input value={employeeSearch} onChange={(e) => setEmployeeSearch(e.target.value)} placeholder="Ф.И.О., СНИЛС, паспорт или ВУС" /></label>
+                <label><span>Статус</span><select value={activeFilter} onChange={(e) => setActiveFilter(e.target.value)}><option value="active">Работающие</option><option value="dismissed">Уволенные</option><option value="all">Все</option></select></label>
+                <label><span>Подразделение</span><select value={departmentFilter} onChange={(e) => setDepartmentFilter(e.target.value)}><option value="">Все</option>{uniqueValues(employees, "department").map((value) => <option key={value}>{value}</option>)}</select></label>
+                <label><span>Военкомат</span><select value={commissariatFilter} onChange={(e) => setCommissariatFilter(e.target.value)}><option value="">Все</option>{uniqueValues(employees, "militaryCommissariat").map((value) => <option key={value}>{value}</option>)}</select></label>
+                <label><span>Вид учёта</span><select value={accountFilter} onChange={(e) => setAccountFilter(e.target.value)}><option value="">Все</option><option value="general">Общий</option><option value="special">Специальный</option></select></label>
+                <label><span>Карточка</span><select value={attentionFilter} onChange={(e) => setAttentionFilter(e.target.value)}><option value="">Все</option><option value="missing">Есть пропуски</option></select></label>
+              </div>
+              {filteredEmployees.length ? (
+                <div className="data-panel table-scroll">
+                  <table className="registry-table">
+                    <thead><tr>
+                      <th><button onClick={() => toggleSort("fullName")}>Сотрудник <ChevronDown size={14} /></button></th>
+                      <th><button onClick={() => toggleSort("department")}>Подразделение <ChevronDown size={14} /></button></th>
+                      <th><button onClick={() => toggleSort("position")}>Должность <ChevronDown size={14} /></button></th>
+                      <th><button onClick={() => toggleSort("militaryRank")}>Звание <ChevronDown size={14} /></button></th>
+                      <th><button onClick={() => toggleSort("vus")}>ВУС <ChevronDown size={14} /></button></th>
+                      <th><button onClick={() => toggleSort("fitnessCategory")}>Годность <ChevronDown size={14} /></button></th>
+                      <th>Карточка</th><th></th>
+                    </tr></thead>
+                    <tbody>
+                      {filteredEmployees.map((employee) => {
+                        const missing = getMissingFields(employee);
+                        return <tr key={employee.id} onDoubleClick={() => setEmployeeModal(employee)}>
+                          <td><button className="employee-link" onClick={() => setEmployeeModal(employee)}><span className="avatar"><UserRound size={17} /></span><span><strong>{employee.fullName}</strong><small>{employee.snils || "СНИЛС не указан"}</small></span></button></td>
+                          <td>{employee.department || "—"}</td><td>{employee.position || "—"}</td><td>{employee.militaryRank || "—"}</td><td className="mono">{employee.vus || "—"}</td><td>{employee.fitnessCategory || "—"}</td>
+                          <td><span className={`status ${missing.length ? "missing" : "completed"}`}>{missing.length ? `Не заполнено: ${missing.length}` : "Заполнена"}</span></td>
+                          <td><button className="icon-button" title="Редактировать" onClick={() => setEmployeeModal(employee)}><Pencil size={17} /></button></td>
+                        </tr>;
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              ) : <div className="empty-state compact-empty"><Users size={32} /><h3>Сотрудники не найдены</h3><p>Измените фильтры или импортируйте Excel.</p></div>}
+            </>
+          ) : null}
+
+          {view === "notifications" ? (
+            <>
+              <section className="section-heading compact">
+                <div><span className="eyebrow">Законодательные сроки</span><h2>Уведомления и задачи</h2><p>Срок рассчитывается от даты фактического события.</p></div>
+                <button className="button primary small" onClick={() => openEventModal()}><Plus size={16} /> Создать задачу</button>
+              </section>
+              <div className="filter-panel notice-filters">
+                <label className="search-box"><Search size={18} /><input value={noticeSearch} onChange={(e) => setNoticeSearch(e.target.value)} placeholder="Сотрудник или задача" /></label>
+                <label><span>Статус</span><select value={noticeFilter} onChange={(e) => setNoticeFilter(e.target.value)}><option value="open">Все открытые</option><option value="today">Срок сегодня</option><option value="overdue">Просроченные</option><option value="upcoming">Предстоящие</option><option value="completed">Исполненные</option><option value="all">Все</option></select></label>
+              </div>
+              {filteredNotices.length ? <div className="notice-grid">
+                {filteredNotices.map((notice) => {
+                  const employee = employees.find((item) => item.id === notice.employeeId);
+                  const rule = RULES.find((item) => item.id === notice.ruleId);
+                  const status = noticeStatus(notice);
+                  return <article className={`notice-card ${status}`} key={notice.id}>
+                    <div className="notice-top"><span className={`status ${status}`}>{statusLabel(status, notice.dueDate)}</span><span>{formatDate(notice.dueDate)}</span></div>
+                    <h3>{rule?.title}</h3><p className="notice-person">{employee?.fullName ?? "Сотрудник удалён"}</p>
+                    {notice.note ? <p>{notice.note}</p> : null}
+                    <div className="notice-meta"><span>Событие: {formatDate(notice.eventDate)}</span><a href={rule?.sourceUrl} target="_blank" rel="noreferrer"><BookOpen size={14} /> {rule?.source}</a></div>
+                    <div className="notice-help"><Info size={16} /><span>{rule?.help}<small>{rule?.documentHint}</small></span></div>
+                    <div className="card-actions">
+                      {status === "completed" ? <button className="button ghost small" onClick={() => reopenNotice(notice)}><RotateCcw size={15} /> Вернуть в работу</button> : <button className="button primary small" onClick={() => completeNotice(notice)}><Check size={15} /> Исполнено</button>}
+                      {employee ? <button className="button secondary small" onClick={() => setEmployeeModal(employee)}><UserRound size={15} /> Карточка</button> : null}
+                    </div>
+                  </article>;
+                })}
+              </div> : <div className="empty-state compact-empty"><Bell size={32} /><h3>Задач по выбранному фильтру нет</h3><p>Создайте событие — система рассчитает срок и покажет правовое основание.</p></div>}
+            </>
+          ) : null}
+
+          {view === "documents" ? (
+            <>
+              <section className="section-heading compact"><div><span className="eyebrow">Word и PDF</span><h2>Формирование документов</h2><p>Документы заполняются из карточки сотрудника.</p></div></section>
+              <div className="document-layout">
+                <section className="data-panel document-builder">
+                  <h3>Параметры документа</h3>
+                  <label className="field"><span>Сотрудник</span><select value={documentEmployeeId} onChange={(e) => setDocumentEmployeeId(e.target.value)}><option value="">Выберите сотрудника</option>{employees.slice().sort((a,b)=>a.fullName.localeCompare(b.fullName,"ru")).map((employee)=><option value={employee.id} key={employee.id}>{employee.fullName}</option>)}</select></label>
+                  <div className="segmented"><button className={documentType === "form10" ? "active" : ""} onClick={() => setDocumentType("form10")}>Форма № 10</button><button className={documentType === "f2" ? "active" : ""} onClick={() => setDocumentType("f2")}>Справка Ф-2</button></div>
+                  {documentType === "f2" ? <label className="field"><span>Событие</span><select value={f2Event} onChange={(e) => setF2Event(e.target.value as "hire" | "dismissal")}><option value="hire">Принят на работу</option><option value="dismissal">Уволен с работы</option></select></label> : null}
+                  {documentEmployeeId ? (() => {
+                    const employee = employees.find((item) => item.id === documentEmployeeId);
+                    const missing = employee ? getMissingFields(employee) : [];
+                    return missing.length ? <div className="inline-warning"><AlertCircle size={18} /><span><strong>Перед выгрузкой проверьте карточку</strong>Не заполнено: {missing.slice(0,5).join(", ")}{missing.length > 5 ? ` и ещё ${missing.length-5}` : ""}.</span></div> : <div className="inline-success"><Check size={18} /> Основные поля заполнены</div>;
+                  })() : null}
+                  <div className="builder-actions"><button className="button primary" onClick={downloadWord} disabled={!documentEmployeeId}><FileDown size={18} /> Скачать Word</button><button className="button secondary" onClick={printDocument} disabled={!documentEmployeeId}><Printer size={18} /> Печать / PDF</button></div>
+                </section>
+                <section className="document-preview-card">
+                  <div className="paper-preview">
+                    <span>{documentType === "form10" ? "Форма № 10" : "СВЕДЕНИЯ"}</span>
+                    <strong>{documentEmployeeId ? employees.find((item) => item.id === documentEmployeeId)?.fullName : "Выберите сотрудника"}</strong>
+                    <div>{Array.from({ length: 10 }).map((_, index) => <i key={index} />)}</div>
+                  </div>
+                  <p>{documentType === "form10" ? "Две страницы A4: лицевая и оборотная стороны." : "Одна страница A4 по приложению № 2 к Положению о воинском учёте."}</p>
+                </section>
+              </div>
+              {documents.length ? <section className="history-section"><h3>Последние сформированные документы</h3><div className="data-panel history-list">{documents.slice(0,8).map((document) => <div key={document.id}><FileText size={17}/><span><strong>{document.title}</strong><small>{employees.find((employee)=>employee.id===document.employeeId)?.fullName ?? "Карточка удалена"}</small></span><time>{new Intl.DateTimeFormat("ru-RU",{dateStyle:"short",timeStyle:"short"}).format(new Date(document.createdAt))}</time></div>)}</div></section> : null}
+            </>
+          ) : null}
+
+          {view === "reconciliations" ? (
+            <>
+              <section className="section-heading compact"><div><span className="eyebrow">Ежегодный контроль</span><h2>Сверки</h2><p>Отдельно с документами гражданина и с военным комиссариатом.</p></div></section>
+              <div className="filter-panel notice-filters"><label className="search-box"><Search size={18}/><input value={reconciliationSearch} onChange={(e)=>setReconciliationSearch(e.target.value)} placeholder="Поиск сотрудника"/></label><label><span>Состояние</span><select value={reconciliationFilter} onChange={(e)=>setReconciliationFilter(e.target.value)}><option value="attention">Требует внимания</option><option value="all">Все</option></select></label></div>
+              <div className="reconciliation-grid">
+                {employees.filter((employee)=>employee.active && employee.fullName.toLowerCase().includes(reconciliationSearch.toLowerCase())).filter((employee)=>{
+                  if(reconciliationFilter==="all") return true;
+                  const employeeDue = employee.lastEmployeeVerification ? daysFromToday(addCalendarDays(employee.lastEmployeeVerification,365)) : -1;
+                  const vkDue = employee.lastCommissariatVerification ? daysFromToday(addCalendarDays(employee.lastCommissariatVerification,365)) : -1;
+                  return employeeDue === null || employeeDue <= 30 || vkDue === null || vkDue <= 30;
+                }).map((employee)=> {
+                  const employeeNext = employee.lastEmployeeVerification ? addCalendarDays(employee.lastEmployeeVerification,365) : "";
+                  const vkNext = employee.lastCommissariatVerification ? addCalendarDays(employee.lastCommissariatVerification,365) : "";
+                  return <article className="reconciliation-card" key={employee.id}><div className="reconciliation-person"><span className="avatar"><UserRound size={18}/></span><span><strong>{employee.fullName}</strong><small>{employee.militaryCommissariat || "Военкомат не указан"}</small></span></div>
+                    <div className="verification-block"><span>С документами сотрудника</span><strong>{employee.lastEmployeeVerification ? formatDate(employee.lastEmployeeVerification) : "Не проводилась"}</strong><small>Следующая: {employeeNext ? formatDate(employeeNext) : "требуется"}</small><button className="button secondary small" onClick={()=>updateVerification(employee,"employee")}><Check size={14}/> Отметить сверку</button></div>
+                    <div className="verification-block"><span>С военным комиссариатом</span><strong>{employee.lastCommissariatVerification ? formatDate(employee.lastCommissariatVerification) : "Не проводилась"}</strong><small>Следующая: {vkNext ? formatDate(vkNext) : "требуется"}</small><button className="button secondary small" onClick={()=>updateVerification(employee,"commissariat")}><Check size={14}/> Отметить сверку</button></div>
+                  </article>;
+                })}
+              </div>
+              {!employees.length ? <div className="empty-state compact-empty"><ListChecks size={32}/><h3>Нет сотрудников для сверки</h3><p>Импортируйте реестр или добавьте карточку.</p></div> : null}
+            </>
+          ) : null}
+
+          {view === "settings" ? (
+            <>
+              <section className="section-heading compact"><div><span className="eyebrow">Параметры рабочего контура</span><h2>Настройки и помощь</h2><p>Изменения сохраняются автоматически на этом устройстве.</p></div></section>
+              <div className="settings-grid">
+                <section className="data-panel settings-card">
+                  <div className="card-title"><span className="kpi-icon teal"><Settings size={20}/></span><div><h3>Организация</h3><p>Используется при заполнении Word/PDF.</p></div></div>
+                  <div className="form-grid two-col">
+                    <Field label="Полное наименование" value={organization.organizationName} onChange={(value)=>setOrganization({...organization,organizationName:value})}/>
+                    <Field label="Краткое наименование" value={organization.shortName} onChange={(value)=>setOrganization({...organization,shortName:value})}/>
+                    <Field label="Адрес организации" value={organization.organizationAddress} onChange={(value)=>setOrganization({...organization,organizationAddress:value})}/>
+                    <Field label="Должность руководителя" value={organization.directorPosition} onChange={(value)=>setOrganization({...organization,directorPosition:value})}/>
+                    <Field label="Ф.И.О. руководителя" value={organization.directorName} onChange={(value)=>setOrganization({...organization,directorName:value})}/>
+                    <Field label="Должность ответственного" value={organization.responsiblePosition} onChange={(value)=>setOrganization({...organization,responsiblePosition:value})}/>
+                    <Field label="Ф.И.О. ответственного" value={organization.responsibleName} onChange={(value)=>setOrganization({...organization,responsibleName:value})}/>
+                    <Field label="Военкомат по умолчанию" value={organization.defaultCommissariat} onChange={(value)=>setOrganization({...organization,defaultCommissariat:value})}/>
+                    <Field label="Адрес военкомата" value={organization.defaultCommissariatAddress} onChange={(value)=>setOrganization({...organization,defaultCommissariatAddress:value})}/>
+                    <Field label="Дополнительные нерабочие дни" value={organization.extraHolidays} placeholder="2026-04-20, 2026-09-01" help="Укажите даты через запятую. Они будут исключены при расчёте сроков в рабочих днях." onChange={(value)=>setOrganization({...organization,extraHolidays:value})}/>
+                  </div>
+                </section>
+                <section className="data-panel settings-card">
+                  <div className="card-title"><span className="kpi-icon blue"><Database size={20}/></span><div><h3>Локальные данные</h3><p>В сайт и на сервер персональные данные не отправляются.</p></div></div>
+                  <div className="storage-stat"><strong>{employees.length}</strong><span>карточек сотрудников</span></div>
+                  <div className="settings-actions"><button className="button primary" onClick={exportBackup}><Download size={17}/> Создать резервную копию</button><input ref={backupInput} hidden type="file" accept=".json" onChange={restoreBackup}/><button className="button secondary" onClick={()=>backupInput.current?.click()}><ArchiveRestore size={17}/> Восстановить</button><button className="button danger-outline" onClick={clearAllData}><Trash2 size={17}/> Очистить данные</button></div>
+                </section>
+              </div>
+              <section className="legal-section">
+                <div className="section-heading compact"><div><span className="eyebrow">Актуально на 27.07.2026</span><h2>Правила уведомлений</h2><p>Нажмите на основание, чтобы открыть действующую редакцию.</p></div></div>
+                <div className="legal-grid">{RULES.map((rule)=><a href={rule.sourceUrl} target="_blank" rel="noreferrer" key={rule.id}><span className="rule-days">{rule.days === null ? "!" : rule.days}<small>{rule.days === null ? "срочно" : rule.workingDays ? "раб. дн." : "дней"}</small></span><span><strong>{rule.shortTitle}</strong><small>{rule.source}</small><p>{rule.help}</p></span><ChevronRight size={17}/></a>)}</div>
+              </section>
+              <section className="quick-help data-panel"><div className="card-title"><span className="kpi-icon amber"><Info size={20}/></span><div><h3>Как начать работу</h3><p>Первая настройка занимает несколько минут.</p></div></div><ol><li><span>1</span><div><strong>Заполните данные организации</strong><p>Они автоматически подставятся в Форму № 10 и Ф-2.</p></div></li><li><span>2</span><div><strong>Импортируйте Excel</strong><p>Сначала программа покажет количество карточек и предупреждения.</p></div></li><li><span>3</span><div><strong>Исправьте неполные карточки</strong><p>Фильтр «Есть пропуски» найдёт сотрудников, которых нужно проверить.</p></div></li><li><span>4</span><div><strong>Создавайте события</strong><p>Приём, увольнение и изменения создают задачи с правовым основанием и сроком.</p></div></li></ol></section>
+            </>
+          ) : null}
+        </div>
+      </main>
+
+      {employeeModal ? (
+        <div className="modal-backdrop" role="presentation" onMouseDown={(event) => event.target === event.currentTarget && setEmployeeModal(null)}>
+          <form className="modal employee-modal" onSubmit={saveEmployee}>
+            <div className="modal-header"><div><span className="eyebrow">{employees.some((employee)=>employee.id===employeeModal.id) ? "Редактирование" : "Новая карточка"}</span><h2>{employeeModal.fullName || "Сотрудник"}</h2></div><button type="button" className="icon-button" onClick={()=>setEmployeeModal(null)} aria-label="Закрыть"><X size={20}/></button></div>
+            <div className="modal-body">
+              {getMissingFields(employeeModal).length ? <div className="inline-warning"><AlertCircle size={18}/><span><strong>Карточка заполнена не полностью</strong>Не заполнено: {getMissingFields(employeeModal).slice(0,6).join(", ")}{getMissingFields(employeeModal).length>6 ? ` и ещё ${getMissingFields(employeeModal).length-6}` : ""}.</span></div> : <div className="inline-success"><Check size={18}/> Обязательные поля заполнены</div>}
+              <fieldset><legend>Основные сведения</legend><div className="form-grid three-col">
+                <Field required label="Ф.И.О." value={employeeModal.fullName} onChange={(value)=>setEmployeeModal({...employeeModal,fullName:value})}/>
+                <label className="field"><span>Пол</span><select value={employeeModal.sex} onChange={(e)=>setEmployeeModal({...employeeModal,sex:e.target.value as "male"|"female"})}><option value="male">Мужской</option><option value="female">Женский</option></select></label>
+                <Field required type="date" label="Дата рождения" value={employeeModal.birthDate} onChange={(value)=>setEmployeeModal({...employeeModal,birthDate:value})}/>
+                <Field required label="Место рождения" value={employeeModal.birthPlace} onChange={(value)=>setEmployeeModal({...employeeModal,birthPlace:value})}/>
+                <Field label="СНИЛС" value={employeeModal.snils} onChange={(value)=>setEmployeeModal({...employeeModal,snils:value})}/>
+                <Field label="ИНН" value={employeeModal.inn} onChange={(value)=>setEmployeeModal({...employeeModal,inn:value})}/>
+              </div></fieldset>
+              <fieldset><legend>Работа</legend><div className="form-grid three-col">
+                <Field label="Подразделение" value={employeeModal.department} onChange={(value)=>setEmployeeModal({...employeeModal,department:value})}/>
+                <Field label="Должность" value={employeeModal.position} onChange={(value)=>setEmployeeModal({...employeeModal,position:value})}/>
+                <label className="field"><span>Статус</span><select value={employeeModal.active ? "active":"dismissed"} onChange={(e)=>setEmployeeModal({...employeeModal,active:e.target.value==="active"})}><option value="active">Работает</option><option value="dismissed">Уволен</option></select></label>
+                <Field type="date" label="Дата приёма" value={employeeModal.hireDate} onChange={(value)=>setEmployeeModal({...employeeModal,hireDate:value})}/>
+                <Field label="Номер приказа" value={employeeModal.orderNumber} onChange={(value)=>setEmployeeModal({...employeeModal,orderNumber:value})}/>
+                <Field type="date" label="Дата приказа" value={employeeModal.orderDate} onChange={(value)=>setEmployeeModal({...employeeModal,orderDate:value})}/>
+                {!employeeModal.active ? <Field type="date" label="Дата увольнения" value={employeeModal.dismissalDate} onChange={(value)=>setEmployeeModal({...employeeModal,dismissalDate:value})}/> : null}
+              </div></fieldset>
+              <fieldset><legend>Паспорт, адреса и контакты</legend><div className="form-grid three-col">
+                <Field required label="Серия паспорта" value={employeeModal.passportSeries} onChange={(value)=>setEmployeeModal({...employeeModal,passportSeries:value})}/>
+                <Field required label="Номер паспорта" value={employeeModal.passportNumber} onChange={(value)=>setEmployeeModal({...employeeModal,passportNumber:value})}/>
+                <Field type="date" label="Дата выдачи" value={employeeModal.passportIssueDate} onChange={(value)=>setEmployeeModal({...employeeModal,passportIssueDate:value})}/>
+                <Field label="Кем выдан" value={employeeModal.passportIssuedBy} onChange={(value)=>setEmployeeModal({...employeeModal,passportIssuedBy:value})}/>
+                <Field required label="Адрес регистрации" value={employeeModal.registrationAddress} onChange={(value)=>setEmployeeModal({...employeeModal,registrationAddress:value})}/>
+                <Field type="date" label="Дата регистрации" value={employeeModal.registrationDate} onChange={(value)=>setEmployeeModal({...employeeModal,registrationDate:value})}/>
+                <Field label="Фактический адрес" value={employeeModal.actualAddress} onChange={(value)=>setEmployeeModal({...employeeModal,actualAddress:value})}/>
+                <Field type="date" label="Дата начала проживания" value={employeeModal.actualAddressDate} onChange={(value)=>setEmployeeModal({...employeeModal,actualAddressDate:value})}/>
+                <Field label="Сотовый телефон" value={employeeModal.phone} onChange={(value)=>setEmployeeModal({...employeeModal,phone:value})}/>
+                <Field label="Рабочий телефон" value={employeeModal.workPhone} onChange={(value)=>setEmployeeModal({...employeeModal,workPhone:value})}/>
+              </div></fieldset>
+              <fieldset><legend>Образование и семья</legend><div className="form-grid three-col">
+                <Field label="Образование" value={employeeModal.education} onChange={(value)=>setEmployeeModal({...employeeModal,education:value})}/>
+                <Field label="Профессия" value={employeeModal.profession} onChange={(value)=>setEmployeeModal({...employeeModal,profession:value})}/>
+                <Field label="Иностранные языки" value={employeeModal.languages} onChange={(value)=>setEmployeeModal({...employeeModal,languages:value})}/>
+                <Field label="Водительское удостоверение" value={employeeModal.driverLicense} onChange={(value)=>setEmployeeModal({...employeeModal,driverLicense:value})}/>
+                <Field label="Семейное положение" value={employeeModal.maritalStatus} onChange={(value)=>setEmployeeModal({...employeeModal,maritalStatus:value})}/>
+                <Field label="Состав семьи" value={employeeModal.familyMembers} help="Степень родства, Ф.И.О. и год рождения каждого члена семьи." onChange={(value)=>setEmployeeModal({...employeeModal,familyMembers:value})}/>
+              </div></fieldset>
+              <fieldset><legend>Воинский учёт</legend><div className="form-grid three-col">
+                <Field label="Вид документа" value={employeeModal.militaryDocType} onChange={(value)=>setEmployeeModal({...employeeModal,militaryDocType:value})}/>
+                <Field required label="Серия и номер документа" value={employeeModal.militaryDocNumber} onChange={(value)=>setEmployeeModal({...employeeModal,militaryDocNumber:value})}/>
+                <Field type="date" label="Дата выдачи документа" value={employeeModal.militaryDocIssueDate} onChange={(value)=>setEmployeeModal({...employeeModal,militaryDocIssueDate:value})}/>
+                <Field label="Кем выдан документ" value={employeeModal.militaryDocIssuedBy} onChange={(value)=>setEmployeeModal({...employeeModal,militaryDocIssuedBy:value})}/>
+                <Field required label="Воинское звание" value={employeeModal.militaryRank} onChange={(value)=>setEmployeeModal({...employeeModal,militaryRank:value})}/>
+                <Field required label="Состав" value={employeeModal.composition} onChange={(value)=>setEmployeeModal({...employeeModal,composition:value})}/>
+                <Field label="Профиль" value={employeeModal.profile} onChange={(value)=>setEmployeeModal({...employeeModal,profile:value})}/>
+                <Field required label="ВУС" value={employeeModal.vus} help="Хранится как текст, чтобы не потерять начальные нули." onChange={(value)=>setEmployeeModal({...employeeModal,vus:value})}/>
+                <Field required label="Категория запаса" value={employeeModal.reserveCategory} onChange={(value)=>setEmployeeModal({...employeeModal,reserveCategory:value})}/>
+                <Field required label="Категория годности" value={employeeModal.fitnessCategory} onChange={(value)=>setEmployeeModal({...employeeModal,fitnessCategory:value})}/>
+                <label className="field"><span>Вид учёта</span><select value={employeeModal.accountType} onChange={(e)=>setEmployeeModal({...employeeModal,accountType:e.target.value as Employee["accountType"]})}><option value="">Не указано</option><option value="general">Общий</option><option value="special">Специальный</option></select></label>
+                {employeeModal.accountType==="general" ? <Field label="Номер команды (партии)" value={employeeModal.teamNumber} onChange={(value)=>setEmployeeModal({...employeeModal,teamNumber:value})}/> : null}
+                {employeeModal.accountType==="special" ? <Field label="Документ специального учёта" value={employeeModal.specialAccountNumber} onChange={(value)=>setEmployeeModal({...employeeModal,specialAccountNumber:value})}/> : null}
+                <Field required label="Военный комиссариат" value={employeeModal.militaryCommissariat} onChange={(value)=>setEmployeeModal({...employeeModal,militaryCommissariat:value})}/>
+                <Field label="Адрес военного комиссариата" value={employeeModal.militaryCommissariatAddress} onChange={(value)=>setEmployeeModal({...employeeModal,militaryCommissariatAddress:value})}/>
+                <Field type="date" label="Сверка с документами сотрудника" value={employeeModal.lastEmployeeVerification} onChange={(value)=>setEmployeeModal({...employeeModal,lastEmployeeVerification:value})}/>
+                <Field type="date" label="Сверка с военкоматом" value={employeeModal.lastCommissariatVerification} onChange={(value)=>setEmployeeModal({...employeeModal,lastCommissariatVerification:value})}/>
+                <Field label="Дополнительные сведения" value={employeeModal.notes} onChange={(value)=>setEmployeeModal({...employeeModal,notes:value})}/>
+              </div></fieldset>
+            </div>
+            <div className="modal-footer">{employees.some((employee)=>employee.id===employeeModal.id) ? <button type="button" className="button danger-outline" onClick={()=>deleteEmployee(employeeModal)}><Trash2 size={16}/> Удалить</button> : <span/>}<div><button type="button" className="button secondary" onClick={()=>setEmployeeModal(null)}>Отмена</button><button className="button primary" type="submit"><Check size={16}/> Сохранить</button></div></div>
+          </form>
+        </div>
+      ) : null}
+
+      {eventModal ? (
+        <div className="modal-backdrop" role="presentation" onMouseDown={(event)=>event.target===event.currentTarget && setEventModal(false)}>
+          <form className="modal event-modal" onSubmit={saveEvent}>
+            <div className="modal-header"><div><span className="eyebrow">Новое событие</span><h2>Законодательная задача</h2></div><button type="button" className="icon-button" onClick={()=>setEventModal(false)}><X size={20}/></button></div>
+            <div className="modal-body">
+              <label className="field"><span>Сотрудник</span><select required value={eventDraft.employeeId} onChange={(e)=>setEventDraft({...eventDraft,employeeId:e.target.value})}><option value="">Выберите сотрудника</option>{employees.filter((employee)=>employee.active || eventDraft.ruleId==="dismissal").map((employee)=><option value={employee.id} key={employee.id}>{employee.fullName}</option>)}</select></label>
+              <label className="field"><span>Событие</span><select value={eventDraft.ruleId} onChange={(e)=>changeEventRule(e.target.value)}>{RULES.map((rule)=><option value={rule.id} key={rule.id}>{rule.shortTitle}</option>)}</select></label>
+              <div className="form-grid two-col"><Field type="date" label="Дата события" value={eventDraft.eventDate} onChange={changeEventDate}/><Field type="date" label={eventDraft.ruleId==="summons" ? "Дата явки":"Крайний срок"} value={eventDraft.dueDate} onChange={(value)=>setEventDraft({...eventDraft,dueDate:value})}/></div>
+              <Field label="Примечание" value={eventDraft.note} placeholder="Что изменилось, номер запроса, особенности вручения…" onChange={(value)=>setEventDraft({...eventDraft,note:value})}/>
+              {(() => {const rule=RULES.find((item)=>item.id===eventDraft.ruleId); return <div className="rule-callout"><BookOpen size={18}/><span><strong>{rule?.source}</strong>{rule?.help}<small>Рекомендуемый документ: {rule?.documentHint}</small><a href={rule?.sourceUrl} target="_blank" rel="noreferrer">Открыть источник <ChevronRight size={14}/></a></span></div>})()}
+            </div>
+            <div className="modal-footer"><span/><div><button type="button" className="button secondary" onClick={()=>setEventModal(false)}>Отмена</button><button className="button primary" type="submit"><Plus size={16}/> Создать задачу</button></div></div>
+          </form>
+        </div>
+      ) : null}
+
+      {importPreview ? (
+        <div className="modal-backdrop">
+          <section className="modal import-modal">
+            <div className="modal-header"><div><span className="eyebrow">Предварительная проверка</span><h2>Импорт Excel</h2></div><button className="icon-button" onClick={()=>setImportPreview(null)}><X size={20}/></button></div>
+            <div className="modal-body">
+              <div className="import-file"><FileSpreadsheet size={28}/><span><strong>{importPreview.filename}</strong><small>Найдено карточек: {importPreview.employees.length}</small></span></div>
+              {importPreview.warnings.length ? <div className="inline-warning"><AlertCircle size={18}/><span><strong>После импорта потребуется проверка</strong>{importPreview.warnings.join(". ")}. Пропуски будут видны в фильтре «Есть пропуски».</span></div> : <div className="inline-success"><Check size={18}/> Явных проблем не обнаружено</div>}
+              <p className="import-note">Импорт не создаёт просроченные задачи по старым приказам. Новые сроки появляются только после создания события в программе.</p>
+            </div>
+            <div className="modal-footer split-footer"><button className="button secondary" onClick={()=>setImportPreview(null)}>Отмена</button><div><button className="button secondary" onClick={()=>commitImport("merge")}>Добавить и обновить</button><button className="button primary" onClick={()=>commitImport("replace")}>Заменить реестр</button></div></div>
+          </section>
+        </div>
+      ) : null}
+
+      {toast ? <div className="toast"><Check size={17}/>{toast}</div> : null}
+    </div>
+  );
+}
