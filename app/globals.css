@@ -611,7 +611,7 @@ select:focus-visible {
 
 .filter-panel {
   display: grid;
-  grid-template-columns: minmax(250px, 1.7fr) repeat(4, minmax(130px, 1fr));
+  grid-template-columns: minmax(250px, 1.7fr) repeat(3, minmax(130px, 1fr));
   align-items: end;
   gap: 12px;
   margin: 0 0 16px;
@@ -913,6 +913,54 @@ select:focus-visible {
   box-shadow: 0 1px 4px rgba(23, 32, 51, 0.1);
 }
 
+.f2-options {
+  display: grid;
+  gap: 14px;
+}
+
+.event-checklist {
+  display: grid;
+  gap: 9px;
+  margin: 0;
+  border: 1px solid var(--border);
+  border-radius: 9px;
+  background: #f8fafb;
+  padding: 13px;
+}
+
+.event-checklist legend {
+  padding: 0 6px;
+  color: var(--text);
+  font-size: 12px;
+  font-weight: 750;
+}
+
+.event-checklist label {
+  display: flex;
+  align-items: flex-start;
+  gap: 9px;
+  color: var(--text);
+  font-size: 13px;
+  line-height: 1.4;
+}
+
+.event-checklist input {
+  flex: 0 0 auto;
+  margin-top: 2px;
+  accent-color: var(--teal);
+}
+
+.event-checklist small {
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.f2-order-fields {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(170px, .7fr);
+  gap: 12px;
+}
+
 .inline-warning {
   margin-top: 17px;
   background: var(--warning-pale);
@@ -1106,6 +1154,64 @@ select:focus-visible {
   flex-direction: column;
   justify-content: flex-end;
   gap: 6px;
+}
+
+.family-editor {
+  margin-top: 18px;
+  border-radius: 9px;
+  background: #f6f9fa;
+  padding: 14px;
+}
+
+.family-editor-heading {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 10px;
+}
+
+.family-editor-heading > span {
+  color: var(--text);
+  font-size: 13px;
+  font-weight: 750;
+}
+
+.family-editor-heading small,
+.family-row-head {
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.family-row {
+  display: grid;
+  grid-template-columns: minmax(140px, .8fr) minmax(240px, 1.5fr) minmax(155px, .7fr) 38px;
+  align-items: center;
+  gap: 10px;
+  margin-top: 8px;
+}
+
+.family-row input {
+  width: 100%;
+  height: 40px;
+  min-width: 0;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  background: #fff;
+  padding: 0 11px;
+  color: var(--text);
+  font: inherit;
+  font-size: 13px;
+}
+
+.family-row input:focus {
+  border-color: var(--teal);
+  outline: 0;
+  box-shadow: 0 0 0 3px rgba(15, 143, 157, 0.12);
+}
+
+.family-add {
+  margin-top: 12px;
 }
 
 .storage-stat {
@@ -1561,6 +1667,20 @@ select:focus-visible {
   .form-grid.two-col,
   .form-grid.three-col {
     grid-template-columns: 1fr;
+  }
+  .f2-order-fields {
+    grid-template-columns: 1fr;
+  }
+  .family-editor-heading {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+  .family-row,
+  .family-row-head {
+    grid-template-columns: 1fr;
+  }
+  .family-row-head {
+    display: none;
   }
   .reconciliation-card {
     grid-template-columns: 1fr;

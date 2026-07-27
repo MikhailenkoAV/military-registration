@@ -1,9 +1,7 @@
 "use client";
 
 import { ChangeEvent, FormEvent, useEffect, useMemo, useRef, useState } from "react";
-import fontkit from "@pdf-lib/fontkit";
 import { strFromU8, strToU8, unzipSync, zipSync } from "fflate";
-import { PDFDocument, PDFFont, PDFPage, rgb } from "pdf-lib";
 import * as XLSX from "xlsx";
 import {
   AlertCircle,
@@ -27,7 +25,6 @@ import {
   Menu,
   Pencil,
   Plus,
-  Printer,
   RotateCcw,
   Search,
   Settings,
@@ -278,7 +275,7 @@ const emptySettings: OrganizationSettings = {
   directorPosition: "Генеральный директор",
   directorName: "",
   responsiblePosition: "Специалист по ведению воинского учёта",
-  responsibleName: "",
+  responsibleName: "Михайленко А.В.",
   defaultCommissariat: "",
   defaultCommissariatAddress: "",
   extraHolidays: "",
@@ -523,12 +520,30 @@ function uniqueValues(employees: Employee[], key: keyof Employee) {
   ).sort((a, b) => a.localeCompare(b, "ru"));
 }
 
-function familyRows(value: string) {
+type FamilyMember = {
+  relation: string;
+  fullName: string;
+  birthDate: string;
+};
+
+function familyRows(value: string): FamilyMember[] {
   return value
-    .split(/\r?\n|;\s*/)
-    .map((item) => item.trim())
-    .filter(Boolean)
+    .split(/\r?\n/)
+    .map((item) => {
+      const parts = item.split("|").map((part) => part.trim());
+      const [relation = "", fullName = "", birthDate = ""] =
+        parts.length === 1 ? ["", parts[0], ""] : parts;
+      return { relation, fullName, birthDate };
+    })
+    .filter((item) => item.relation || item.fullName || item.birthDate)
     .slice(0, 4);
+}
+
+function serializeFamilyRows(rows: FamilyMember[]) {
+  return rows
+    .filter((item) => item.relation || item.fullName || item.birthDate)
+    .map((item) => [item.relation, item.fullName, item.birthDate].join(" | "))
+    .join("\n");
 }
 
 function assetUrl(name: string) {
@@ -549,10 +564,12 @@ function documentValues(
   employee: Employee,
   settings: OrganizationSettings,
   eventType: "hire" | "dismissal",
+  f2OrderNumber: string,
+  f2OrderDate: string,
 ) {
   const family = familyRows(employee.familyMembers);
   const languages = employee.languages.split(/[;,]/).map((item) => item.trim()).filter(Boolean);
-  const orderDate = parseLocalDate(employee.orderDate);
+  const orderDate = parseLocalDate(f2OrderDate || employee.orderDate);
   const monthNames = [
     "января", "февраля", "марта", "апреля", "мая", "июня",
     "июля", "августа", "сентября", "октября", "ноября", "декабря",
@@ -583,14 +600,14 @@ function documentValues(
     PROFESSION: employee.profession,
     ADDITIONAL_PROFESSION: "",
     MARITAL_STATUS: employee.maritalStatus,
-    FAMILY_REL_1: "",
-    FAMILY_PERSON_1: family[0] ?? "",
-    FAMILY_REL_2: "",
-    FAMILY_PERSON_2: family[1] ?? "",
-    FAMILY_REL_3: "",
-    FAMILY_PERSON_3: family[2] ?? "",
-    FAMILY_REL_4: "",
-    FAMILY_PERSON_4: family[3] ?? "",
+    FAMILY_REL_1: family[0]?.relation ?? "",
+    FAMILY_PERSON_1: family[0] ? [family[0].fullName, formatDate(family[0].birthDate, "")].filter(Boolean).join(", ") : "",
+    FAMILY_REL_2: family[1]?.relation ?? "",
+    FAMILY_PERSON_2: family[1] ? [family[1].fullName, formatDate(family[1].birthDate, "")].filter(Boolean).join(", ") : "",
+    FAMILY_REL_3: family[2]?.relation ?? "",
+    FAMILY_PERSON_3: family[2] ? [family[2].fullName, formatDate(family[2].birthDate, "")].filter(Boolean).join(", ") : "",
+    FAMILY_REL_4: family[3]?.relation ?? "",
+    FAMILY_PERSON_4: family[3] ? [family[3].fullName, formatDate(family[3].birthDate, "")].filter(Boolean).join(", ") : "",
     LANGUAGE_1: languages[0] ?? "",
     LANGUAGE_LEVEL_1: languages.length === 1 ? employee.languages : "",
     LANGUAGE_2: languages[1] ?? "",
@@ -607,17 +624,16 @@ function documentValues(
     REGISTRATION_ADDRESS: employee.registrationAddress,
     REGISTRATION_DATE: formatDate(employee.registrationDate, ""),
     ACTUAL_ADDRESS: employee.actualAddress,
-    ACTUAL_ADDRESS_DATE: formatDate(employee.actualAddressDate, ""),
-    WORK_PHONE: employee.workPhone,
+    ACTUAL_ADDRESS_DATE: "",
+    WORK_PHONE: "",
     MOBILE_PHONE: employee.phone,
     RESERVE_CATEGORY: employee.reserveCategory,
     COMMISSARIAT: employee.militaryCommissariat || settings.defaultCommissariat,
     COMMISSARIAT_SHORT: employee.militaryCommissariat || settings.defaultCommissariat,
     MILITARY_RANK: employee.militaryRank,
     COMPOSITION_PROFILE: [employee.composition, employee.profile].filter(Boolean).join(" / "),
-    TEAM_NUMBER: employee.accountType === "general" ? employee.teamNumber : "",
-    SPECIAL_ACCOUNT_NUMBER:
-      employee.accountType === "special" ? employee.specialAccountNumber : "",
+    TEAM_NUMBER: "",
+    SPECIAL_ACCOUNT_NUMBER: "",
     VUS: employee.vus,
     FITNESS_CATEGORY: employee.fitnessCategory,
     MILITARY_DOCUMENT: militaryDocument,
@@ -627,11 +643,11 @@ function documentValues(
     RESPONSIBLE_POSITION: settings.responsiblePosition,
     RESPONSIBLE_NAME: settings.responsibleName,
     SNILS: employee.snils,
-    EMPLOYMENT_EVENT:
-      eventType === "hire"
-        ? "принят (поступил) на работу"
-        : "уволен с работы (отчислен из образовательной организации)",
-    ORDER_NUMBER: employee.orderNumber,
+    EVENT_HIRE: "принят (поступил) на работу",
+    EVENT_DISMISSAL: "уволен с работы (отчислен из образовательной организации)",
+    HIRE_STRIKE: eventType === "hire" ? "0" : "1",
+    DISMISSAL_STRIKE: eventType === "dismissal" ? "0" : "1",
+    ORDER_NUMBER: f2OrderNumber || employee.orderNumber,
     ORDER_DAY: orderDate ? String(orderDate.getDate()).padStart(2, "0") : "",
     ORDER_MONTH: orderDate ? monthNames[orderDate.getMonth()] : "",
     ORDER_YEAR: orderDate ? String(orderDate.getFullYear()).slice(-2) : "",
@@ -645,153 +661,25 @@ async function buildDocx(
   settings: OrganizationSettings,
   type: "form10" | "f2",
   eventType: "hire" | "dismissal",
+  f2OrderNumber: string,
+  f2OrderDate: string,
 ) {
   const response = await fetch(assetUrl(type === "form10" ? "form10-template.docx" : "f2-template.docx"));
   if (!response.ok) throw new Error("Не удалось загрузить шаблон Word");
   const archive = unzipSync(new Uint8Array(await response.arrayBuffer()));
-  const values = documentValues(employee, settings, eventType);
+  const values = documentValues(employee, settings, eventType, f2OrderNumber, f2OrderDate);
   for (const [path, content] of Object.entries(archive)) {
     if (!path.startsWith("word/") || !path.endsWith(".xml")) continue;
     let xml = strFromU8(content);
     for (const [key, value] of Object.entries(values)) {
       xml = xml.replaceAll(`{{${key}}}`, xmlValue(value));
     }
+    xml = xml.replace(/\{\{[A-Z0-9_]+\}\}/g, "");
     archive[path] = strToU8(xml);
   }
   return new Blob([zipSync(archive, { level: 6 }) as BlobPart], {
     type: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
   });
-}
-
-const mm = (value: number) => (value * 72) / 25.4;
-
-function fitText(font: PDFFont, text: string, width: number, preferred: number, minimum: number) {
-  let size = preferred;
-  while (size > minimum && font.widthOfTextAtSize(text, size) > width) size -= 0.25;
-  return size;
-}
-
-function drawPdfField(
-  page: PDFPage,
-  font: PDFFont,
-  value: unknown,
-  left: number,
-  top: number,
-  width: number,
-  height = 5,
-  preferredSize = 9,
-  minimumSize = 5.5,
-  align: "left" | "center" = "center",
-  cover = true,
-) {
-  const text = String(value ?? "").trim();
-  const x = mm(left);
-  const fieldWidth = mm(width);
-  const fieldHeight = mm(height);
-  const y = page.getHeight() - mm(top) - fieldHeight;
-  if (cover) {
-    page.drawRectangle({
-      x: x + 0.8,
-      y: y + 0.8,
-      width: Math.max(1, fieldWidth - 1.6),
-      height: Math.max(1, fieldHeight - 1.6),
-      color: rgb(1, 1, 1),
-    });
-  }
-  if (!text) return;
-  const size = fitText(font, text, fieldWidth - 4, preferredSize, minimumSize);
-  const textWidth = font.widthOfTextAtSize(text, size);
-  page.drawText(text, {
-    x: align === "center" ? x + Math.max(2, (fieldWidth - textWidth) / 2) : x + 2,
-    y: y + Math.max(1.5, (fieldHeight - size) / 2 + 1),
-    size,
-    font,
-    color: rgb(0, 0, 0),
-    maxWidth: fieldWidth - 4,
-  });
-}
-
-async function buildPdf(
-  employee: Employee,
-  settings: OrganizationSettings,
-  type: "form10" | "f2",
-  eventType: "hire" | "dismissal",
-) {
-  const [templateResponse, fontResponse] = await Promise.all([
-    fetch(assetUrl(type === "form10" ? "form10-template.pdf" : "f2-template.pdf")),
-    fetch(assetUrl("DejaVuSerif.ttf")),
-  ]);
-  if (!templateResponse.ok || !fontResponse.ok) throw new Error("Не удалось загрузить шаблон PDF");
-  const pdf = await PDFDocument.load(await templateResponse.arrayBuffer());
-  pdf.registerFontkit(fontkit);
-  const font = await pdf.embedFont(await fontResponse.arrayBuffer(), { subset: true });
-
-  if (type === "form10") {
-    const [front, back] = pdf.getPages();
-    const family = familyRows(employee.familyMembers);
-    const militaryDocument = [
-      employee.militaryDocType,
-      employee.militaryDocNumber,
-      formatDate(employee.militaryDocIssueDate, ""),
-      employee.militaryDocIssuedBy,
-    ].filter(Boolean).join(", ");
-    drawPdfField(front, font, settings.organizationName, 19.6, 56.1, 176.1, 5.4, 9, 6);
-    drawPdfField(front, font, employee.lastName, 64.4, 91.5, 131.1, 5, 9, 6, "left");
-    drawPdfField(front, font, employee.firstName, 64.4, 98.4, 131.1, 5, 9, 6, "left");
-    drawPdfField(front, font, employee.middleName, 64.4, 105.3, 131.1, 5, 9, 6, "left");
-    drawPdfField(front, font, formatDate(employee.birthDate, ""), 64.4, 112.2, 50.3);
-    drawPdfField(front, font, employee.birthPlace, 64.4, 119.1, 131.1, 5, 8, 5.5, "left");
-    drawPdfField(front, font, employee.education, 64.4, 126.1, 50.3, 5, 8, 5.5, "left");
-    drawPdfField(front, font, employee.profession, 64.4, 150.8, 64.4, 5, 8, 5.5, "left");
-    drawPdfField(front, font, employee.maritalStatus, 64.4, 158.8, 50.3);
-    family.forEach((item, index) =>
-      drawPdfField(front, font, item, 89.4, 166.3 + index * 7.5, 106.4, 4.9, 7, 5, "left"),
-    );
-    drawPdfField(front, font, employee.languages, 64.4, 197.5, 131.1, 5, 7, 5, "left");
-    drawPdfField(front, font, employee.passportSeries, 64.4, 207.1, 21.1);
-    drawPdfField(front, font, employee.passportNumber, 89.4, 207.1, 50.4);
-    drawPdfField(front, font, formatDate(employee.passportIssueDate, ""), 143.6, 207.1, 52);
-    drawPdfField(front, font, employee.passportIssuedBy, 64.4, 215.4, 131.1, 5, 7, 5, "left");
-    drawPdfField(front, font, employee.driverLicense, 64.4, 223.1, 131.1, 5, 7, 5, "left");
-    drawPdfField(front, font, employee.registrationAddress, 64.4, 232.6, 81.1, 5, 7, 4.5, "left");
-    drawPdfField(front, font, formatDate(employee.registrationDate, ""), 150.4, 232.6, 45.2, 5, 8, 5);
-    drawPdfField(front, font, employee.actualAddress, 64.4, 240.4, 81.1, 5, 7, 4.5, "left");
-    drawPdfField(front, font, formatDate(employee.actualAddressDate, ""), 150.4, 240.4, 45.2, 5, 8, 5);
-    drawPdfField(front, font, employee.workPhone, 64.4, 248.5, 64.5);
-    drawPdfField(front, font, employee.phone, 132.5, 248.5, 63.1);
-
-    drawPdfField(back, font, employee.reserveCategory, 55, 29.4, 37.6, 12.8);
-    drawPdfField(back, font, employee.militaryRank, 55, 50.1, 37.6);
-    drawPdfField(back, font, [employee.composition, employee.profile].filter(Boolean).join(" / "), 55, 57.6, 37.6, 9.5, 7, 5);
-    drawPdfField(back, font, employee.vus, 55, 69.8, 37.6);
-    drawPdfField(back, font, employee.fitnessCategory, 55, 89.1, 37.6);
-    drawPdfField(back, font, employee.militaryCommissariat, 146.4, 28.7, 44.2, 16.7, 7, 4.5, "left");
-    drawPdfField(back, font, employee.accountType === "general" ? employee.teamNumber : "", 146.4, 62.1, 44.2);
-    drawPdfField(back, font, employee.accountType === "special" ? employee.specialAccountNumber : "", 146.4, 69.9, 44.2);
-    drawPdfField(back, font, militaryDocument, 146.4, 84.1, 44.2, 13.8, 6.5, 4.5, "left");
-    drawPdfField(back, font, employee.notes, 15, 118.2, 175, 17.2, 7, 4.5, "left");
-    drawPdfField(back, font, `${formatDate(employee.orderDate, "")}${employee.orderNumber ? ` № ${employee.orderNumber}` : ""}`, 14.7, 165.2, 40.4, 5, 7, 4.5);
-    drawPdfField(back, font, employee.position, 55.2, 165.2, 64.4, 5, 7, 4.5, "left");
-    drawPdfField(back, font, employee.militaryCommissariat, 119.7, 164.5, 36.7, 8.4, 6, 4, "left");
-    drawPdfField(back, font, settings.responsiblePosition, 64.5, 196.8, 45, 8, 6, 4, "left");
-    drawPdfField(back, font, settings.responsibleName, 153.6, 198.1, 37, 5, 6, 4);
-    drawPdfField(back, font, employee.fullName, 153.6, 210.1, 37, 5, 6, 4);
-  } else {
-    const page = pdf.getPages()[0];
-    const commissariat = employee.militaryCommissariat || settings.defaultCommissariat;
-    drawPdfField(page, font, commissariat, 105, 40, 96, 9, 9, 5.5, "left");
-    drawPdfField(page, font, employee.fullName, 68.2, 118.5, 124.8, 5.6, 9, 5.5, "left");
-    drawPdfField(page, font, employee.militaryRank, 108.2, 129.4, 84.8, 5.3, 9, 5.5, "left");
-    drawPdfField(page, font, formatDate(employee.birthDate, ""), 20.1, 136.4, 72, 5.3, 8, 5.5);
-    drawPdfField(page, font, `${employee.passportSeries} ${employee.passportNumber}`, 110, 136.4, 83, 5.3, 8, 5.5);
-    drawPdfField(page, font, employee.snils, 113.7, 142.1, 79.3, 5.3, 8, 5.5);
-    drawPdfField(page, font, employee.registrationAddress, 45.2, 147.7, 147.8, 5.5, 7, 4.5, "left");
-    drawPdfField(page, font, eventType === "hire" ? "принят (поступил) на работу" : "уволен с работы", 20, 152.2, 175, 6.2, 8, 5);
-    drawPdfField(page, font, employee.position, 20, 191.3, 175, 5.5, 8, 5, "left");
-    drawPdfField(page, font, employee.orderNumber, 92, 204.3, 36, 5.5, 8, 5);
-    drawPdfField(page, font, formatDate(employee.orderDate, ""), 139, 204.3, 52, 5.5, 8, 5);
-  }
-  return new Blob([await pdf.save() as BlobPart], { type: "application/pdf" });
 }
 
 function downloadBlob(blob: Blob, filename: string) {
@@ -838,6 +726,63 @@ function Field({
   );
 }
 
+function FamilyMembersEditor({
+  value,
+  onChange,
+}: {
+  value: string;
+  onChange: (value: string) => void;
+}) {
+  const [rows, setRows] = useState<FamilyMember[]>(() => {
+    const parsed = familyRows(value);
+    return parsed.length ? parsed : [{ relation: "", fullName: "", birthDate: "" }];
+  });
+
+  // Only reset the row editor when its serialized value changes externally.
+  useEffect(() => {
+    if (serializeFamilyRows(rows) === value) return;
+    const parsed = familyRows(value);
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setRows(parsed.length ? parsed : [{ relation: "", fullName: "", birthDate: "" }]);
+    // The serialized value is the source of truth when another employee is opened.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [value]);
+
+  function updateRow(index: number, patch: Partial<FamilyMember>) {
+    const next = rows.map((row, rowIndex) => rowIndex === index ? { ...row, ...patch } : row);
+    setRows(next);
+    onChange(serializeFamilyRows(next));
+  }
+
+  function removeRow(index: number) {
+    const next = rows.filter((_, rowIndex) => rowIndex !== index);
+    const normalized = next.length ? next : [{ relation: "", fullName: "", birthDate: "" }];
+    setRows(normalized);
+    onChange(serializeFamilyRows(normalized));
+  }
+
+  return (
+    <div className="family-editor">
+      <div className="family-editor-heading">
+        <span>Состав семьи</span>
+        <small>Степень родства, Ф.И.О. и дата рождения</small>
+      </div>
+      <div className="family-row family-row-head" aria-hidden="true">
+        <span>Степень родства</span><span>Ф.И.О.</span><span>Дата рождения</span><span />
+      </div>
+      {rows.map((row, index) => (
+        <div className="family-row" key={index}>
+          <input value={row.relation} placeholder="Супруг(а), сын…" onChange={(event) => updateRow(index, { relation: event.target.value })} />
+          <input value={row.fullName} placeholder="Фамилия Имя Отчество" onChange={(event) => updateRow(index, { fullName: event.target.value })} />
+          <input type="date" value={row.birthDate} onChange={(event) => updateRow(index, { birthDate: event.target.value })} />
+          <button type="button" className="icon-button" aria-label="Удалить члена семьи" onClick={() => removeRow(index)}><Trash2 size={16} /></button>
+        </div>
+      ))}
+      <button type="button" className="button secondary small family-add" onClick={() => setRows([...rows, { relation: "", fullName: "", birthDate: "" }])}><Plus size={15} /> Добавить члена семьи</button>
+    </div>
+  );
+}
+
 export default function HomePage() {
   const [view, setView] = useState<View>("dashboard");
   const [menuOpen, setMenuOpen] = useState(false);
@@ -856,7 +801,6 @@ export default function HomePage() {
   const [toast, setToast] = useState("");
   const [employeeSearch, setEmployeeSearch] = useState("");
   const [departmentFilter, setDepartmentFilter] = useState("");
-  const [commissariatFilter, setCommissariatFilter] = useState("");
   const [attentionFilter, setAttentionFilter] = useState("");
   const [activeFilter, setActiveFilter] = useState("active");
   const [sortField, setSortField] = useState<keyof Employee>("fullName");
@@ -866,6 +810,8 @@ export default function HomePage() {
   const [documentEmployeeId, setDocumentEmployeeId] = useState("");
   const [documentType, setDocumentType] = useState<"form10" | "f2">("form10");
   const [f2Event, setF2Event] = useState<"hire" | "dismissal">("hire");
+  const [f2OrderNumber, setF2OrderNumber] = useState("");
+  const [f2OrderDate, setF2OrderDate] = useState("");
   const [reconciliationSearch, setReconciliationSearch] = useState("");
   const [reconciliationFilter, setReconciliationFilter] = useState("attention");
   const excelInput = useRef<HTMLInputElement>(null);
@@ -931,7 +877,6 @@ export default function HomePage() {
         if (activeFilter === "active" && !employee.active) return false;
         if (activeFilter === "dismissed" && employee.active) return false;
         if (departmentFilter && employee.department !== departmentFilter) return false;
-        if (commissariatFilter && employee.militaryCommissariat !== commissariatFilter) return false;
         if (attentionFilter === "missing" && getMissingFields(employee).length === 0) return false;
         if (
           search &&
@@ -960,7 +905,6 @@ export default function HomePage() {
     employeeSearch,
     activeFilter,
     departmentFilter,
-    commissariatFilter,
     attentionFilter,
     sortField,
     sortDirection,
@@ -1055,7 +999,6 @@ export default function HomePage() {
   function resetEmployeeFilters() {
     setEmployeeSearch("");
     setDepartmentFilter("");
-    setCommissariatFilter("");
     setAttentionFilter("");
     setActiveFilter("active");
   }
@@ -1266,35 +1209,26 @@ export default function HomePage() {
     ]);
   }
 
-  async function downloadPdf() {
-    const employee = employees.find((item) => item.id === documentEmployeeId);
-    if (!employee) {
-      setToast("Выберите сотрудника.");
-      return;
-    }
-    try {
-      setToast("Формируется PDF…");
-      const blob = await buildPdf(employee, organization, documentType, f2Event);
-      downloadBlob(
-        blob,
-        `${documentType === "form10" ? "Форма-10" : "Справка-Ф-2"}_${employee.fullName.replaceAll(" ", "_")}.pdf`,
-      );
-      recordDocument(employee, documentType);
-      setToast("Заполненный PDF подготовлен.");
-    } catch {
-      setToast("Не удалось сформировать PDF. Проверьте шаблоны и повторите попытку.");
-    }
-  }
-
   async function downloadWord() {
     const employee = employees.find((item) => item.id === documentEmployeeId);
     if (!employee) {
       setToast("Выберите сотрудника.");
       return;
     }
+    if (documentType === "f2" && (!f2OrderNumber.trim() || !f2OrderDate)) {
+      setToast("Для справки Ф-2 укажите номер и дату приказа (трудового договора).");
+      return;
+    }
     try {
       setToast("Формируется редактируемый Word…");
-      const blob = await buildDocx(employee, organization, documentType, f2Event);
+      const blob = await buildDocx(
+        employee,
+        organization,
+        documentType,
+        f2Event,
+        f2OrderNumber,
+        f2OrderDate,
+      );
       downloadBlob(
         blob,
         `${documentType === "form10" ? "Форма-10" : "Справка-Ф-2"}_${employee.fullName.replaceAll(" ", "_")}.docx`,
@@ -1544,7 +1478,6 @@ export default function HomePage() {
                 <label className="search-box"><Search size={18} /><input value={employeeSearch} onChange={(e) => setEmployeeSearch(e.target.value)} placeholder="Ф.И.О., СНИЛС, паспорт или ВУС" /></label>
                 <label><span>Статус</span><select value={activeFilter} onChange={(e) => setActiveFilter(e.target.value)}><option value="active">Работающие</option><option value="dismissed">Уволенные</option><option value="all">Все</option></select></label>
                 <label><span>Подразделение</span><select value={departmentFilter} onChange={(e) => setDepartmentFilter(e.target.value)}><option value="">Все</option>{uniqueValues(employees, "department").map((value) => <option key={value}>{value}</option>)}</select></label>
-                <label><span>Военкомат</span><select value={commissariatFilter} onChange={(e) => setCommissariatFilter(e.target.value)}><option value="">Все</option>{uniqueValues(employees, "militaryCommissariat").map((value) => <option key={value}>{value}</option>)}</select></label>
                 <label><span>Карточка</span><select value={attentionFilter} onChange={(e) => setAttentionFilter(e.target.value)}><option value="">Все</option><option value="missing">Есть пропуски</option></select></label>
               </div>
               {filteredEmployees.length ? (
@@ -1609,13 +1542,23 @@ export default function HomePage() {
 
           {view === "documents" ? (
             <>
-              <section className="section-heading compact"><div><span className="eyebrow">Word и PDF</span><h2>Формирование документов</h2><p>Основной формат — редактируемый Word. PDF формируется готовым для печати.</p></div></section>
+              <section className="section-heading compact"><div><span className="eyebrow">Редактируемый Word</span><h2>Формирование документов</h2><p>Форма № 10 и справка Ф-2 выгружаются заполненными в формате DOCX.</p></div></section>
               <div className="document-layout">
                 <section className="data-panel document-builder">
                   <h3>Параметры документа</h3>
                   <label className="field"><span>Сотрудник</span><select value={documentEmployeeId} onChange={(e) => setDocumentEmployeeId(e.target.value)}><option value="">Выберите сотрудника</option>{employees.slice().sort((a,b)=>a.fullName.localeCompare(b.fullName,"ru")).map((employee)=><option value={employee.id} key={employee.id}>{employee.fullName}</option>)}</select></label>
                   <div className="segmented"><button className={documentType === "form10" ? "active" : ""} onClick={() => setDocumentType("form10")}>Форма № 10</button><button className={documentType === "f2" ? "active" : ""} onClick={() => setDocumentType("f2")}>Справка Ф-2</button></div>
-                  {documentType === "f2" ? <label className="field"><span>Событие</span><select value={f2Event} onChange={(e) => setF2Event(e.target.value as "hire" | "dismissal")}><option value="hire">Принят на работу</option><option value="dismissal">Уволен с работы</option></select></label> : null}
+                  {documentType === "f2" ? <div className="f2-options">
+                    <fieldset className="event-checklist"><legend>Отметка в справке</legend>
+                      <label><input type="radio" name="f2-event" checked={f2Event==="hire"} onChange={()=>setF2Event("hire")}/><span>Принят (поступил) на работу</span></label>
+                      <label><input type="radio" name="f2-event" checked={f2Event==="dismissal"} onChange={()=>setF2Event("dismissal")}/><span>Уволен с работы (отчислен из образовательной организации)</span></label>
+                      <small>Выбранный вариант останется обычным, второй будет зачёркнут.</small>
+                    </fieldset>
+                    <div className="f2-order-fields">
+                      <Field required label="Номер приказа (трудового договора)" value={f2OrderNumber} onChange={setF2OrderNumber}/>
+                      <Field required type="date" label="Дата приказа (трудового договора)" value={f2OrderDate} onChange={setF2OrderDate}/>
+                    </div>
+                  </div> : null}
                   {documentEmployeeId ? (() => {
                     const employee = employees.find((item) => item.id === documentEmployeeId);
                     const missing = employee ? getMissingFields(employee) : [];
@@ -1624,7 +1567,6 @@ export default function HomePage() {
                   <div className="builder-actions">
                     <button className="button ghost" onClick={() => { const employee = employees.find((item) => item.id === documentEmployeeId); if (employee) setEmployeeModal(employee); }} disabled={!documentEmployeeId}><Pencil size={17} /> Редактировать данные</button>
                     <button className="button primary" onClick={downloadWord} disabled={!documentEmployeeId}><FileDown size={18} /> Скачать Word</button>
-                    <button className="button secondary" onClick={downloadPdf} disabled={!documentEmployeeId}><Printer size={18} /> Скачать PDF</button>
                   </div>
                 </section>
                 <section className="document-preview-card">
@@ -1668,15 +1610,15 @@ export default function HomePage() {
               <section className="section-heading compact"><div><span className="eyebrow">Параметры рабочего контура</span><h2>Настройки и помощь</h2><p>Изменения сохраняются автоматически на этом устройстве.</p></div></section>
               <div className="settings-grid">
                 <section className="data-panel settings-card">
-                  <div className="card-title"><span className="kpi-icon teal"><Settings size={20}/></span><div><h3>Организация</h3><p>Используется при заполнении Word/PDF.</p></div></div>
+                  <div className="card-title"><span className="kpi-icon teal"><Settings size={20}/></span><div><h3>Организация</h3><p>Используется при заполнении Word.</p></div></div>
                   <div className="form-grid two-col">
                     <Field label="Полное наименование" value={organization.organizationName} onChange={(value)=>setOrganization({...organization,organizationName:value})}/>
                     <Field label="Краткое наименование" value={organization.shortName} onChange={(value)=>setOrganization({...organization,shortName:value})}/>
                     <Field label="Адрес организации" value={organization.organizationAddress} onChange={(value)=>setOrganization({...organization,organizationAddress:value})}/>
                     <Field label="Должность руководителя" value={organization.directorPosition} onChange={(value)=>setOrganization({...organization,directorPosition:value})}/>
                     <Field label="Ф.И.О. руководителя" value={organization.directorName} onChange={(value)=>setOrganization({...organization,directorName:value})}/>
-                    <Field label="Должность ответственного" value={organization.responsiblePosition} onChange={(value)=>setOrganization({...organization,responsiblePosition:value})}/>
-                    <Field label="Ф.И.О. ответственного" value={organization.responsibleName} onChange={(value)=>setOrganization({...organization,responsibleName:value})}/>
+                    <Field label="Должность специалиста по воинскому учёту" value={organization.responsiblePosition} onChange={(value)=>setOrganization({...organization,responsiblePosition:value})}/>
+                    <Field label="Ф.И.О. специалиста по воинскому учёту" value={organization.responsibleName} onChange={(value)=>setOrganization({...organization,responsibleName:value})}/>
                     <Field label="Военкомат по умолчанию" value={organization.defaultCommissariat} onChange={(value)=>setOrganization({...organization,defaultCommissariat:value})}/>
                     <Field label="Адрес военкомата" value={organization.defaultCommissariatAddress} onChange={(value)=>setOrganization({...organization,defaultCommissariatAddress:value})}/>
                     <Field label="Дополнительные нерабочие дни" value={organization.extraHolidays} placeholder="2026-04-20, 2026-09-01" help="Укажите даты через запятую. Они будут исключены при расчёте сроков в рабочих днях." onChange={(value)=>setOrganization({...organization,extraHolidays:value})}/>
@@ -1715,7 +1657,7 @@ export default function HomePage() {
               <fieldset><legend>Работа</legend><div className="form-grid three-col">
                 <Field label="Подразделение" value={employeeModal.department} onChange={(value)=>setEmployeeModal({...employeeModal,department:value})}/>
                 <Field label="Должность" value={employeeModal.position} onChange={(value)=>setEmployeeModal({...employeeModal,position:value})}/>
-                <label className="field"><span>Статус</span><select value={employeeModal.active ? "active":"dismissed"} onChange={(e)=>setEmployeeModal({...employeeModal,active:e.target.value==="active"})}><option value="active">Работает</option><option value="dismissed">Уволен</option></select></label>
+                {employees.some((employee)=>employee.id===employeeModal.id) ? <label className="field"><span>Статус</span><select value={employeeModal.active ? "active":"dismissed"} onChange={(e)=>setEmployeeModal({...employeeModal,active:e.target.value==="active"})}><option value="active">Работает</option><option value="dismissed">Уволен</option></select></label> : null}
                 <Field type="date" label="Дата приёма" value={employeeModal.hireDate} onChange={(value)=>setEmployeeModal({...employeeModal,hireDate:value})}/>
                 <Field label="Номер приказа" value={employeeModal.orderNumber} onChange={(value)=>setEmployeeModal({...employeeModal,orderNumber:value})}/>
                 <Field type="date" label="Дата приказа" value={employeeModal.orderDate} onChange={(value)=>setEmployeeModal({...employeeModal,orderDate:value})}/>
@@ -1729,18 +1671,15 @@ export default function HomePage() {
                 <Field required label="Адрес регистрации" value={employeeModal.registrationAddress} onChange={(value)=>setEmployeeModal({...employeeModal,registrationAddress:value})}/>
                 <Field type="date" label="Дата регистрации" value={employeeModal.registrationDate} onChange={(value)=>setEmployeeModal({...employeeModal,registrationDate:value})}/>
                 <Field label="Фактический адрес" value={employeeModal.actualAddress} onChange={(value)=>setEmployeeModal({...employeeModal,actualAddress:value})}/>
-                <Field type="date" label="Дата начала проживания" value={employeeModal.actualAddressDate} onChange={(value)=>setEmployeeModal({...employeeModal,actualAddressDate:value})}/>
                 <Field label="Сотовый телефон" value={employeeModal.phone} onChange={(value)=>setEmployeeModal({...employeeModal,phone:value})}/>
-                <Field label="Рабочий телефон" value={employeeModal.workPhone} onChange={(value)=>setEmployeeModal({...employeeModal,workPhone:value})}/>
               </div></fieldset>
               <fieldset><legend>Образование и семья</legend><div className="form-grid three-col">
                 <Field label="Образование" value={employeeModal.education} onChange={(value)=>setEmployeeModal({...employeeModal,education:value})}/>
                 <Field label="Профессия" value={employeeModal.profession} onChange={(value)=>setEmployeeModal({...employeeModal,profession:value})}/>
                 <Field label="Иностранные языки" value={employeeModal.languages} onChange={(value)=>setEmployeeModal({...employeeModal,languages:value})}/>
                 <Field label="Водительское удостоверение" value={employeeModal.driverLicense} onChange={(value)=>setEmployeeModal({...employeeModal,driverLicense:value})}/>
-                <Field label="Семейное положение" value={employeeModal.maritalStatus} onChange={(value)=>setEmployeeModal({...employeeModal,maritalStatus:value})}/>
-                <Field label="Состав семьи" value={employeeModal.familyMembers} help="Степень родства, Ф.И.О. и год рождения каждого члена семьи." onChange={(value)=>setEmployeeModal({...employeeModal,familyMembers:value})}/>
-              </div></fieldset>
+                <label className="field"><span>Семейное положение</span><select value={employeeModal.maritalStatus} onChange={(event)=>setEmployeeModal({...employeeModal,maritalStatus:event.target.value})}><option value="">Не указано</option><option>Не состоит в браке (не замужем / не женат)</option><option>Состоит в зарегистрированном браке (женат / замужем)</option><option>Разведён (разведена)</option><option>Вдовец (вдова)</option></select></label>
+              </div><FamilyMembersEditor value={employeeModal.familyMembers} onChange={(value)=>setEmployeeModal({...employeeModal,familyMembers:value})}/></fieldset>
               <fieldset><legend>Воинский учёт</legend><div className="form-grid three-col">
                 <Field label="Вид документа" value={employeeModal.militaryDocType} onChange={(value)=>setEmployeeModal({...employeeModal,militaryDocType:value})}/>
                 <Field required label="Серия и номер документа" value={employeeModal.militaryDocNumber} onChange={(value)=>setEmployeeModal({...employeeModal,militaryDocNumber:value})}/>
@@ -1750,11 +1689,8 @@ export default function HomePage() {
                 <Field required label="Состав" value={employeeModal.composition} onChange={(value)=>setEmployeeModal({...employeeModal,composition:value})}/>
                 <Field label="Профиль" value={employeeModal.profile} onChange={(value)=>setEmployeeModal({...employeeModal,profile:value})}/>
                 <Field required label="ВУС" value={employeeModal.vus} help="Хранится как текст, чтобы не потерять начальные нули." onChange={(value)=>setEmployeeModal({...employeeModal,vus:value})}/>
-                <Field required label="Категория запаса" value={employeeModal.reserveCategory} onChange={(value)=>setEmployeeModal({...employeeModal,reserveCategory:value})}/>
+                <label className="field"><span>Категория запаса *</span><select required value={employeeModal.reserveCategory} onChange={(event)=>setEmployeeModal({...employeeModal,reserveCategory:event.target.value})}><option value="">Не указано</option><option value="1">1</option><option value="2">2</option><option value="3">3</option></select></label>
                 <Field required label="Категория годности" value={employeeModal.fitnessCategory} onChange={(value)=>setEmployeeModal({...employeeModal,fitnessCategory:value})}/>
-                <label className="field"><span>Вид учёта</span><select value={employeeModal.accountType} onChange={(e)=>setEmployeeModal({...employeeModal,accountType:e.target.value as Employee["accountType"]})}><option value="">Не указано</option><option value="general">Общий</option><option value="special">Специальный</option></select></label>
-                {employeeModal.accountType==="general" ? <Field label="Номер команды (партии)" value={employeeModal.teamNumber} onChange={(value)=>setEmployeeModal({...employeeModal,teamNumber:value})}/> : null}
-                {employeeModal.accountType==="special" ? <Field label="Документ специального учёта" value={employeeModal.specialAccountNumber} onChange={(value)=>setEmployeeModal({...employeeModal,specialAccountNumber:value})}/> : null}
                 <Field required label="Военный комиссариат" value={employeeModal.militaryCommissariat} onChange={(value)=>setEmployeeModal({...employeeModal,militaryCommissariat:value})}/>
                 <Field label="Адрес военного комиссариата" value={employeeModal.militaryCommissariatAddress} onChange={(value)=>setEmployeeModal({...employeeModal,militaryCommissariatAddress:value})}/>
                 <Field type="date" label="Сверка с документами сотрудника" value={employeeModal.lastEmployeeVerification} onChange={(value)=>setEmployeeModal({...employeeModal,lastEmployeeVerification:value})}/>
