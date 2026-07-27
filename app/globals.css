@@ -611,7 +611,7 @@ select:focus-visible {
 
 .filter-panel {
   display: grid;
-  grid-template-columns: minmax(250px, 1.7fr) repeat(5, minmax(130px, 1fr));
+  grid-template-columns: minmax(250px, 1.7fr) repeat(4, minmax(130px, 1fr));
   align-items: end;
   gap: 12px;
   margin: 0 0 16px;
@@ -667,14 +667,18 @@ select:focus-visible {
 .search-box {
   position: relative;
   display: block !important;
+  height: 42px !important;
+  align-self: end;
 }
 
 .search-box > svg {
   position: absolute;
   z-index: 1;
-  bottom: 12px;
+  top: 50%;
   left: 12px;
+  transform: translateY(-50%);
   color: #768496;
+  pointer-events: none;
 }
 
 .search-box input {

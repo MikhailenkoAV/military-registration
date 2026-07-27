@@ -1,6 +1,9 @@
 "use client";
 
 import { ChangeEvent, FormEvent, useEffect, useMemo, useRef, useState } from "react";
+import fontkit from "@pdf-lib/fontkit";
+import { strFromU8, strToU8, unzipSync, zipSync } from "fflate";
+import { PDFDocument, PDFFont, PDFPage, rgb } from "pdf-lib";
 import * as XLSX from "xlsx";
 import {
   AlertCircle,
@@ -520,48 +523,6 @@ function uniqueValues(employees: Employee[], key: keyof Employee) {
   ).sort((a, b) => a.localeCompare(b, "ru"));
 }
 
-function htmlEscape(value: unknown) {
-  return String(value ?? "")
-    .replaceAll("&", "&amp;")
-    .replaceAll("<", "&lt;")
-    .replaceAll(">", "&gt;")
-    .replaceAll('"', "&quot;");
-}
-
-function documentShell(title: string, body: string) {
-  return `<!doctype html><html lang="ru"><head><meta charset="utf-8"><title>${htmlEscape(
-    title,
-  )}</title><style>
-  @page{size:A4;margin:0}
-  *{box-sizing:border-box}
-  html,body{margin:0;padding:0;background:#fff}
-  body{font-family:"Times New Roman",serif;color:#000}
-  .form-page{position:relative;width:210mm;height:297mm;overflow:hidden;break-after:page;page-break-after:always;background:#fff}
-  .form-page:last-child{break-after:auto;page-break-after:auto}
-  .form-template{position:absolute;z-index:0;inset:0;width:210mm;height:297mm;object-fit:fill}
-  .form-value{position:absolute;z-index:2;display:flex;align-items:center;justify-content:center;overflow:hidden;padding:0 .8mm;font-size:10pt;line-height:1.04;text-align:center;white-space:nowrap}
-  .form-value.cover{background:#fff}
-  .form-value.small{font-size:8pt}
-  .form-value.tiny{font-size:6.5pt}
-  .form-value.multiline{align-items:flex-start;padding-top:.8mm;white-space:normal;overflow-wrap:anywhere}
-  @media screen{body{width:210mm;margin:0 auto}}
-  @media print{html,body{width:210mm}.form-page{margin:0}}
-  </style></head><body>${body}</body></html>`;
-}
-
-function overlayValue(
-  value: unknown,
-  left: number,
-  top: number,
-  width: number,
-  height = 5,
-  className = "",
-) {
-  return `<span class="form-value ${className}" style="left:${left}mm;top:${top}mm;width:${width}mm;height:${height}mm">${htmlEscape(
-    value,
-  )}</span>`;
-}
-
 function familyRows(value: string) {
   return value
     .split(/\r?\n|;\s*/)
@@ -570,109 +531,277 @@ function familyRows(value: string) {
     .slice(0, 4);
 }
 
-function buildForm10(employee: Employee, settings: OrganizationSettings, assetBase: string) {
+function assetUrl(name: string) {
+  return `${process.env.NEXT_PUBLIC_BASE_PATH ?? ""}/documents/${name}`;
+}
+
+function xmlValue(value: unknown) {
+  return String(value ?? "")
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll("\r\n", "\n")
+    .replaceAll("\r", "\n")
+    .replaceAll("\n", '</w:t><w:br/><w:t xml:space="preserve">');
+}
+
+function documentValues(
+  employee: Employee,
+  settings: OrganizationSettings,
+  eventType: "hire" | "dismissal",
+) {
   const family = familyRows(employee.familyMembers);
-  const documentDetails = [
+  const languages = employee.languages.split(/[;,]/).map((item) => item.trim()).filter(Boolean);
+  const orderDate = parseLocalDate(employee.orderDate);
+  const monthNames = [
+    "января", "февраля", "марта", "апреля", "мая", "июня",
+    "июля", "августа", "сентября", "октября", "ноября", "декабря",
+  ];
+  const militaryDocument = [
     employee.militaryDocType,
     employee.militaryDocNumber,
     formatDate(employee.militaryDocIssueDate, ""),
     employee.militaryDocIssuedBy,
-  ]
-    .filter(Boolean)
-    .join(", ");
-  return documentShell(
-    `Форма № 10 — ${employee.fullName}`,
-    `<section class="form-page" data-form-page="1">
-      <img class="form-template" src="${assetBase}/templates/form10-page-1.png" alt="">
-      ${overlayValue(settings.organizationName || "Акционерное общество Центр авиации «Солярис»", 19.6, 56.1, 176.1, 5.4, "cover")}
-      ${overlayValue(employee.lastName, 64.4, 91.5, 131.1)}
-      ${overlayValue(employee.firstName, 64.4, 98.4, 131.1)}
-      ${overlayValue(employee.middleName, 64.4, 105.3, 131.1)}
-      ${overlayValue(formatDate(employee.birthDate, ""), 64.4, 112.2, 50.3)}
-      ${overlayValue(employee.birthPlace, 64.4, 119.1, 131.1)}
-      ${overlayValue(employee.education, 64.4, 126.1, 50.3, 5, "small")}
-      ${overlayValue(employee.education, 64.7, 133.5, 50.1, 13.8, "small multiline")}
-      ${overlayValue(employee.profession, 64.4, 150.8, 64.4, 5, "small")}
-      ${overlayValue(employee.maritalStatus, 64.4, 158.8, 50.3)}
-      ${family.map((item, index) => overlayValue(item, 89.4, 166.3 + index * 7.5, 106.4, 4.9, "small")).join("")}
-      ${overlayValue(employee.languages, 64.4, 197.5, 131.1, 5, "small")}
-      ${overlayValue(employee.passportSeries, 64.4, 207.1, 21.1)}
-      ${overlayValue(employee.passportNumber, 89.4, 207.1, 50.4)}
-      ${overlayValue(formatDate(employee.passportIssueDate, ""), 143.6, 207.1, 52)}
-      ${overlayValue(employee.passportIssuedBy, 64.4, 215.4, 131.1, 5, "small")}
-      ${overlayValue(employee.driverLicense, 64.4, 223.1, 131.1, 5, "small")}
-      ${overlayValue(employee.registrationAddress, 64.4, 232.6, 81.1, 5, "small")}
-      ${overlayValue(formatDate(employee.registrationDate, ""), 150.4, 232.6, 45.2)}
-      ${overlayValue(employee.actualAddress, 64.4, 240.4, 81.1, 5, "small")}
-      ${overlayValue(formatDate(employee.actualAddressDate, ""), 150.4, 240.4, 45.2)}
-      ${overlayValue(employee.workPhone, 64.4, 248.5, 64.5)}
-      ${overlayValue(employee.phone, 132.5, 248.5, 63.1)}
-    </section>
-    <section class="form-page" data-form-page="2">
-      <img class="form-template" src="${assetBase}/templates/form10-page-2.png" alt="">
-      ${overlayValue(employee.reserveCategory, 55, 29.4, 37.6, 12.8, "multiline")}
-      ${overlayValue(employee.militaryRank, 55, 50.1, 37.6)}
-      ${overlayValue([employee.composition, employee.profile].filter(Boolean).join(" / "), 55, 57.6, 37.6, 9.5, "small multiline")}
-      ${overlayValue(employee.vus, 55, 69.8, 37.6)}
-      ${overlayValue(employee.fitnessCategory, 55, 89.1, 37.6)}
-      ${overlayValue(employee.militaryCommissariat, 146.4, 28.7, 44.2, 16.7, "small multiline")}
-      ${overlayValue(employee.accountType === "general" ? employee.teamNumber : "", 146.4, 62.1, 44.2)}
-      ${overlayValue(employee.accountType === "special" ? employee.specialAccountNumber : "", 146.4, 69.9, 44.2)}
-      ${overlayValue(documentDetails, 146.4, 84.1, 44.2, 13.8, "small multiline")}
-      ${overlayValue(employee.notes, 15, 118.2, 175, 17.2, "small multiline")}
-      ${overlayValue(`${formatDate(employee.orderDate, "")}${employee.orderNumber ? ` № ${employee.orderNumber}` : ""}`, 14.7, 165.2, 40.4, 5, "small")}
-      ${overlayValue(employee.position, 55.2, 165.2, 64.4, 5, "small")}
-      ${overlayValue(employee.militaryCommissariat, 119.7, 164.5, 36.7, 8.4, "tiny multiline")}
-      ${overlayValue(settings.responsiblePosition, 64.5, 196.8, 45, 8, "tiny multiline")}
-      ${overlayValue(settings.responsibleName, 153.6, 198.1, 37, 5, "tiny")}
-      ${overlayValue(employee.fullName, 153.6, 210.1, 37, 5, "tiny")}
-    </section>`,
-  );
+  ].filter(Boolean).join(", ");
+  return {
+    ORG_NAME: settings.organizationName,
+    ORG_SHORT_NAME: settings.shortName,
+    ORG_ADDRESS: settings.organizationAddress,
+    LAST_NAME: employee.lastName,
+    FIRST_NAME: employee.firstName,
+    MIDDLE_NAME: employee.middleName,
+    FULL_NAME: employee.fullName,
+    EMPLOYEE_NAME: employee.fullName,
+    BIRTH_DATE: formatDate(employee.birthDate, ""),
+    BIRTH_PLACE: employee.birthPlace,
+    EDUCATION: employee.education,
+    EDUCATION_ORG: "",
+    QUALIFICATION: "",
+    SPECIALITY: "",
+    DIPLOMA: "",
+    GRADUATION_YEAR: "",
+    PROFESSION: employee.profession,
+    ADDITIONAL_PROFESSION: "",
+    MARITAL_STATUS: employee.maritalStatus,
+    FAMILY_REL_1: "",
+    FAMILY_PERSON_1: family[0] ?? "",
+    FAMILY_REL_2: "",
+    FAMILY_PERSON_2: family[1] ?? "",
+    FAMILY_REL_3: "",
+    FAMILY_PERSON_3: family[2] ?? "",
+    FAMILY_REL_4: "",
+    FAMILY_PERSON_4: family[3] ?? "",
+    LANGUAGE_1: languages[0] ?? "",
+    LANGUAGE_LEVEL_1: languages.length === 1 ? employee.languages : "",
+    LANGUAGE_2: languages[1] ?? "",
+    LANGUAGE_LEVEL_2: "",
+    PASSPORT_SERIES: employee.passportSeries,
+    PASSPORT_NUMBER: employee.passportNumber,
+    PASSPORT: `${employee.passportSeries} ${employee.passportNumber}`.trim(),
+    PASSPORT_ISSUE_DATE: formatDate(employee.passportIssueDate, ""),
+    PASSPORT_ISSUED_BY: employee.passportIssuedBy,
+    DRIVER_SERIES: "",
+    DRIVER_NUMBER: employee.driverLicense,
+    DRIVER_CATEGORIES: "",
+    DRIVER_ISSUE_DATE: "",
+    REGISTRATION_ADDRESS: employee.registrationAddress,
+    REGISTRATION_DATE: formatDate(employee.registrationDate, ""),
+    ACTUAL_ADDRESS: employee.actualAddress,
+    ACTUAL_ADDRESS_DATE: formatDate(employee.actualAddressDate, ""),
+    WORK_PHONE: employee.workPhone,
+    MOBILE_PHONE: employee.phone,
+    RESERVE_CATEGORY: employee.reserveCategory,
+    COMMISSARIAT: employee.militaryCommissariat || settings.defaultCommissariat,
+    COMMISSARIAT_SHORT: employee.militaryCommissariat || settings.defaultCommissariat,
+    MILITARY_RANK: employee.militaryRank,
+    COMPOSITION_PROFILE: [employee.composition, employee.profile].filter(Boolean).join(" / "),
+    TEAM_NUMBER: employee.accountType === "general" ? employee.teamNumber : "",
+    SPECIAL_ACCOUNT_NUMBER:
+      employee.accountType === "special" ? employee.specialAccountNumber : "",
+    VUS: employee.vus,
+    FITNESS_CATEGORY: employee.fitnessCategory,
+    MILITARY_DOCUMENT: militaryDocument,
+    ORDER_DETAILS: `${formatDate(employee.orderDate, "")}${employee.orderNumber ? ` № ${employee.orderNumber}` : ""}`,
+    POSITION: employee.position,
+    OUTGOING_DETAILS: "",
+    RESPONSIBLE_POSITION: settings.responsiblePosition,
+    RESPONSIBLE_NAME: settings.responsibleName,
+    SNILS: employee.snils,
+    EMPLOYMENT_EVENT:
+      eventType === "hire"
+        ? "принят (поступил) на работу"
+        : "уволен с работы (отчислен из образовательной организации)",
+    ORDER_NUMBER: employee.orderNumber,
+    ORDER_DAY: orderDate ? String(orderDate.getDate()).padStart(2, "0") : "",
+    ORDER_MONTH: orderDate ? monthNames[orderDate.getMonth()] : "",
+    ORDER_YEAR: orderDate ? String(orderDate.getFullYear()).slice(-2) : "",
+    DIRECTOR_POSITION: settings.directorPosition,
+    DIRECTOR_NAME: settings.directorName,
+  };
 }
 
-function buildF2(
+async function buildDocx(
   employee: Employee,
   settings: OrganizationSettings,
+  type: "form10" | "f2",
   eventType: "hire" | "dismissal",
-  assetBase: string,
 ) {
-  return documentShell(
-    `Справка Ф-2 — ${employee.fullName}`,
-    `<section class="form-page" data-form-page="1">
-      <img class="form-template" src="${assetBase}/templates/f2-page-1.png" alt="">
-      ${overlayValue(`Военному комиссару (руководителю)\n${employee.militaryCommissariat || settings.defaultCommissariat}`, 105, 26, 96, 25, "cover small multiline")}
-      ${overlayValue(employee.fullName, 68.2, 118.5, 124.8, 5.6, "cover")}
-      ${overlayValue(employee.militaryRank, 108.2, 129.4, 84.8, 5.3, "cover")}
-      ${overlayValue(formatDate(employee.birthDate, ""), 20.1, 136.4, 72, 5.3, "cover")}
-      ${overlayValue(`${employee.passportSeries} ${employee.passportNumber}`, 110, 136.4, 83, 5.3, "cover")}
-      ${overlayValue(employee.snils, 113.7, 142.1, 79.3, 5.3, "cover")}
-      ${overlayValue(employee.registrationAddress, 45.2, 147.7, 147.8, 5.5, "cover small")}
-      ${overlayValue(eventType === "hire" ? "принят (поступил) на работу" : "уволен с работы", 20, 152.2, 175, 6.2, "cover")}
-      ${overlayValue(employee.position, 20, 191.3, 175, 5.5, "cover")}
-      ${overlayValue(employee.orderNumber, 92, 204.3, 36, 5.5, "cover")}
-      ${overlayValue(formatDate(employee.orderDate, ""), 139, 204.3, 52, 5.5, "cover")}
-    </section>`,
-  );
+  const response = await fetch(assetUrl(type === "form10" ? "form10-template.docx" : "f2-template.docx"));
+  if (!response.ok) throw new Error("Не удалось загрузить шаблон Word");
+  const archive = unzipSync(new Uint8Array(await response.arrayBuffer()));
+  const values = documentValues(employee, settings, eventType);
+  for (const [path, content] of Object.entries(archive)) {
+    if (!path.startsWith("word/") || !path.endsWith(".xml")) continue;
+    let xml = strFromU8(content);
+    for (const [key, value] of Object.entries(values)) {
+      xml = xml.replaceAll(`{{${key}}}`, xmlValue(value));
+    }
+    archive[path] = strToU8(xml);
+  }
+  return new Blob([zipSync(archive, { level: 6 }) as BlobPart], {
+    type: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+  });
 }
 
-async function inlineTemplateImages(html: string) {
-  const urls = Array.from(
-    new Set(Array.from(html.matchAll(/src="([^"]+\/templates\/[^"]+\.png)"/g), (match) => match[1])),
-  );
-  let inlined = html;
-  for (const url of urls) {
-    const response = await fetch(url);
-    if (!response.ok) throw new Error(`Не удалось загрузить шаблон: ${url}`);
-    const blob = await response.blob();
-    const dataUrl = await new Promise<string>((resolve, reject) => {
-      const reader = new FileReader();
-      reader.onload = () => resolve(String(reader.result));
-      reader.onerror = () => reject(reader.error);
-      reader.readAsDataURL(blob);
+const mm = (value: number) => (value * 72) / 25.4;
+
+function fitText(font: PDFFont, text: string, width: number, preferred: number, minimum: number) {
+  let size = preferred;
+  while (size > minimum && font.widthOfTextAtSize(text, size) > width) size -= 0.25;
+  return size;
+}
+
+function drawPdfField(
+  page: PDFPage,
+  font: PDFFont,
+  value: unknown,
+  left: number,
+  top: number,
+  width: number,
+  height = 5,
+  preferredSize = 9,
+  minimumSize = 5.5,
+  align: "left" | "center" = "center",
+  cover = true,
+) {
+  const text = String(value ?? "").trim();
+  const x = mm(left);
+  const fieldWidth = mm(width);
+  const fieldHeight = mm(height);
+  const y = page.getHeight() - mm(top) - fieldHeight;
+  if (cover) {
+    page.drawRectangle({
+      x: x + 0.8,
+      y: y + 0.8,
+      width: Math.max(1, fieldWidth - 1.6),
+      height: Math.max(1, fieldHeight - 1.6),
+      color: rgb(1, 1, 1),
     });
-    inlined = inlined.replaceAll(url, dataUrl);
   }
-  return inlined;
+  if (!text) return;
+  const size = fitText(font, text, fieldWidth - 4, preferredSize, minimumSize);
+  const textWidth = font.widthOfTextAtSize(text, size);
+  page.drawText(text, {
+    x: align === "center" ? x + Math.max(2, (fieldWidth - textWidth) / 2) : x + 2,
+    y: y + Math.max(1.5, (fieldHeight - size) / 2 + 1),
+    size,
+    font,
+    color: rgb(0, 0, 0),
+    maxWidth: fieldWidth - 4,
+  });
+}
+
+async function buildPdf(
+  employee: Employee,
+  settings: OrganizationSettings,
+  type: "form10" | "f2",
+  eventType: "hire" | "dismissal",
+) {
+  const [templateResponse, fontResponse] = await Promise.all([
+    fetch(assetUrl(type === "form10" ? "form10-template.pdf" : "f2-template.pdf")),
+    fetch(assetUrl("DejaVuSerif.ttf")),
+  ]);
+  if (!templateResponse.ok || !fontResponse.ok) throw new Error("Не удалось загрузить шаблон PDF");
+  const pdf = await PDFDocument.load(await templateResponse.arrayBuffer());
+  pdf.registerFontkit(fontkit);
+  const font = await pdf.embedFont(await fontResponse.arrayBuffer(), { subset: true });
+
+  if (type === "form10") {
+    const [front, back] = pdf.getPages();
+    const family = familyRows(employee.familyMembers);
+    const militaryDocument = [
+      employee.militaryDocType,
+      employee.militaryDocNumber,
+      formatDate(employee.militaryDocIssueDate, ""),
+      employee.militaryDocIssuedBy,
+    ].filter(Boolean).join(", ");
+    drawPdfField(front, font, settings.organizationName, 19.6, 56.1, 176.1, 5.4, 9, 6);
+    drawPdfField(front, font, employee.lastName, 64.4, 91.5, 131.1, 5, 9, 6, "left");
+    drawPdfField(front, font, employee.firstName, 64.4, 98.4, 131.1, 5, 9, 6, "left");
+    drawPdfField(front, font, employee.middleName, 64.4, 105.3, 131.1, 5, 9, 6, "left");
+    drawPdfField(front, font, formatDate(employee.birthDate, ""), 64.4, 112.2, 50.3);
+    drawPdfField(front, font, employee.birthPlace, 64.4, 119.1, 131.1, 5, 8, 5.5, "left");
+    drawPdfField(front, font, employee.education, 64.4, 126.1, 50.3, 5, 8, 5.5, "left");
+    drawPdfField(front, font, employee.profession, 64.4, 150.8, 64.4, 5, 8, 5.5, "left");
+    drawPdfField(front, font, employee.maritalStatus, 64.4, 158.8, 50.3);
+    family.forEach((item, index) =>
+      drawPdfField(front, font, item, 89.4, 166.3 + index * 7.5, 106.4, 4.9, 7, 5, "left"),
+    );
+    drawPdfField(front, font, employee.languages, 64.4, 197.5, 131.1, 5, 7, 5, "left");
+    drawPdfField(front, font, employee.passportSeries, 64.4, 207.1, 21.1);
+    drawPdfField(front, font, employee.passportNumber, 89.4, 207.1, 50.4);
+    drawPdfField(front, font, formatDate(employee.passportIssueDate, ""), 143.6, 207.1, 52);
+    drawPdfField(front, font, employee.passportIssuedBy, 64.4, 215.4, 131.1, 5, 7, 5, "left");
+    drawPdfField(front, font, employee.driverLicense, 64.4, 223.1, 131.1, 5, 7, 5, "left");
+    drawPdfField(front, font, employee.registrationAddress, 64.4, 232.6, 81.1, 5, 7, 4.5, "left");
+    drawPdfField(front, font, formatDate(employee.registrationDate, ""), 150.4, 232.6, 45.2, 5, 8, 5);
+    drawPdfField(front, font, employee.actualAddress, 64.4, 240.4, 81.1, 5, 7, 4.5, "left");
+    drawPdfField(front, font, formatDate(employee.actualAddressDate, ""), 150.4, 240.4, 45.2, 5, 8, 5);
+    drawPdfField(front, font, employee.workPhone, 64.4, 248.5, 64.5);
+    drawPdfField(front, font, employee.phone, 132.5, 248.5, 63.1);
+
+    drawPdfField(back, font, employee.reserveCategory, 55, 29.4, 37.6, 12.8);
+    drawPdfField(back, font, employee.militaryRank, 55, 50.1, 37.6);
+    drawPdfField(back, font, [employee.composition, employee.profile].filter(Boolean).join(" / "), 55, 57.6, 37.6, 9.5, 7, 5);
+    drawPdfField(back, font, employee.vus, 55, 69.8, 37.6);
+    drawPdfField(back, font, employee.fitnessCategory, 55, 89.1, 37.6);
+    drawPdfField(back, font, employee.militaryCommissariat, 146.4, 28.7, 44.2, 16.7, 7, 4.5, "left");
+    drawPdfField(back, font, employee.accountType === "general" ? employee.teamNumber : "", 146.4, 62.1, 44.2);
+    drawPdfField(back, font, employee.accountType === "special" ? employee.specialAccountNumber : "", 146.4, 69.9, 44.2);
+    drawPdfField(back, font, militaryDocument, 146.4, 84.1, 44.2, 13.8, 6.5, 4.5, "left");
+    drawPdfField(back, font, employee.notes, 15, 118.2, 175, 17.2, 7, 4.5, "left");
+    drawPdfField(back, font, `${formatDate(employee.orderDate, "")}${employee.orderNumber ? ` № ${employee.orderNumber}` : ""}`, 14.7, 165.2, 40.4, 5, 7, 4.5);
+    drawPdfField(back, font, employee.position, 55.2, 165.2, 64.4, 5, 7, 4.5, "left");
+    drawPdfField(back, font, employee.militaryCommissariat, 119.7, 164.5, 36.7, 8.4, 6, 4, "left");
+    drawPdfField(back, font, settings.responsiblePosition, 64.5, 196.8, 45, 8, 6, 4, "left");
+    drawPdfField(back, font, settings.responsibleName, 153.6, 198.1, 37, 5, 6, 4);
+    drawPdfField(back, font, employee.fullName, 153.6, 210.1, 37, 5, 6, 4);
+  } else {
+    const page = pdf.getPages()[0];
+    const commissariat = employee.militaryCommissariat || settings.defaultCommissariat;
+    drawPdfField(page, font, commissariat, 105, 40, 96, 9, 9, 5.5, "left");
+    drawPdfField(page, font, employee.fullName, 68.2, 118.5, 124.8, 5.6, 9, 5.5, "left");
+    drawPdfField(page, font, employee.militaryRank, 108.2, 129.4, 84.8, 5.3, 9, 5.5, "left");
+    drawPdfField(page, font, formatDate(employee.birthDate, ""), 20.1, 136.4, 72, 5.3, 8, 5.5);
+    drawPdfField(page, font, `${employee.passportSeries} ${employee.passportNumber}`, 110, 136.4, 83, 5.3, 8, 5.5);
+    drawPdfField(page, font, employee.snils, 113.7, 142.1, 79.3, 5.3, 8, 5.5);
+    drawPdfField(page, font, employee.registrationAddress, 45.2, 147.7, 147.8, 5.5, 7, 4.5, "left");
+    drawPdfField(page, font, eventType === "hire" ? "принят (поступил) на работу" : "уволен с работы", 20, 152.2, 175, 6.2, 8, 5);
+    drawPdfField(page, font, employee.position, 20, 191.3, 175, 5.5, 8, 5, "left");
+    drawPdfField(page, font, employee.orderNumber, 92, 204.3, 36, 5.5, 8, 5);
+    drawPdfField(page, font, formatDate(employee.orderDate, ""), 139, 204.3, 52, 5.5, 8, 5);
+  }
+  return new Blob([await pdf.save() as BlobPart], { type: "application/pdf" });
+}
+
+function downloadBlob(blob: Blob, filename: string) {
+  const link = window.document.createElement("a");
+  link.href = URL.createObjectURL(blob);
+  link.download = filename;
+  window.document.body.appendChild(link);
+  link.click();
+  link.remove();
+  window.setTimeout(() => URL.revokeObjectURL(link.href), 1500);
 }
 
 function Field({
@@ -728,7 +857,6 @@ export default function HomePage() {
   const [employeeSearch, setEmployeeSearch] = useState("");
   const [departmentFilter, setDepartmentFilter] = useState("");
   const [commissariatFilter, setCommissariatFilter] = useState("");
-  const [accountFilter, setAccountFilter] = useState("");
   const [attentionFilter, setAttentionFilter] = useState("");
   const [activeFilter, setActiveFilter] = useState("active");
   const [sortField, setSortField] = useState<keyof Employee>("fullName");
@@ -804,7 +932,6 @@ export default function HomePage() {
         if (activeFilter === "dismissed" && employee.active) return false;
         if (departmentFilter && employee.department !== departmentFilter) return false;
         if (commissariatFilter && employee.militaryCommissariat !== commissariatFilter) return false;
-        if (accountFilter && employee.accountType !== accountFilter) return false;
         if (attentionFilter === "missing" && getMissingFields(employee).length === 0) return false;
         if (
           search &&
@@ -834,7 +961,6 @@ export default function HomePage() {
     activeFilter,
     departmentFilter,
     commissariatFilter,
-    accountFilter,
     attentionFilter,
     sortField,
     sortDirection,
@@ -930,7 +1056,6 @@ export default function HomePage() {
     setEmployeeSearch("");
     setDepartmentFilter("");
     setCommissariatFilter("");
-    setAccountFilter("");
     setAttentionFilter("");
     setActiveFilter("active");
   }
@@ -1141,66 +1266,44 @@ export default function HomePage() {
     ]);
   }
 
-  function currentDocument() {
+  async function downloadPdf() {
     const employee = employees.find((item) => item.id === documentEmployeeId);
-    if (!employee) return null;
-    const assetBase =
-      window.location.origin + (process.env.NEXT_PUBLIC_BASE_PATH ?? "");
-    return {
-      employee,
-      html:
-        documentType === "form10"
-          ? buildForm10(employee, organization, assetBase)
-          : buildF2(employee, organization, f2Event, assetBase),
-    };
-  }
-
-  function printDocument() {
-    const document = currentDocument();
-    if (!document) {
+    if (!employee) {
       setToast("Выберите сотрудника.");
       return;
     }
-    const popup = window.open("", "_blank");
-    if (!popup) {
-      setToast("Браузер заблокировал окно печати.");
-      return;
+    try {
+      setToast("Формируется PDF…");
+      const blob = await buildPdf(employee, organization, documentType, f2Event);
+      downloadBlob(
+        blob,
+        `${documentType === "form10" ? "Форма-10" : "Справка-Ф-2"}_${employee.fullName.replaceAll(" ", "_")}.pdf`,
+      );
+      recordDocument(employee, documentType);
+      setToast("Заполненный PDF подготовлен.");
+    } catch {
+      setToast("Не удалось сформировать PDF. Проверьте шаблоны и повторите попытку.");
     }
-    popup.opener = null;
-    popup.document.open();
-    popup.document.write(document.html);
-    popup.document.close();
-    popup.focus();
-    window.setTimeout(() => popup.print(), 250);
-    recordDocument(document.employee, documentType);
   }
 
   async function downloadWord() {
-    const document = currentDocument();
-    if (!document) {
+    const employee = employees.find((item) => item.id === documentEmployeeId);
+    if (!employee) {
       setToast("Выберите сотрудника.");
       return;
     }
-    let selfContainedHtml = document.html;
     try {
-      selfContainedHtml = await inlineTemplateImages(document.html);
+      setToast("Формируется редактируемый Word…");
+      const blob = await buildDocx(employee, organization, documentType, f2Event);
+      downloadBlob(
+        blob,
+        `${documentType === "form10" ? "Форма-10" : "Справка-Ф-2"}_${employee.fullName.replaceAll(" ", "_")}.docx`,
+      );
+      recordDocument(employee, documentType);
+      setToast("Редактируемый Word подготовлен.");
     } catch {
-      setToast("Не удалось встроить шаблон в Word. Повторите попытку.");
-      return;
+      setToast("Не удалось сформировать Word. Проверьте шаблоны и повторите попытку.");
     }
-    const blob = new Blob(["\ufeff", selfContainedHtml], { type: "application/msword;charset=utf-8" });
-    const link = window.document.createElement("a");
-    link.href = URL.createObjectURL(blob);
-    link.download = `${documentType === "form10" ? "Форма-10" : "Справка-Ф-2"}_${document.employee.fullName.replaceAll(
-      " ",
-      "_",
-    )}.doc`;
-    window.document.body.appendChild(link);
-    link.click();
-    link.remove();
-    window.setTimeout(() => URL.revokeObjectURL(link.href), 1500);
-    recordDocument(document.employee, documentType);
-    setToast("Документ Word подготовлен.");
   }
 
   function updateVerification(employee: Employee, type: "employee" | "commissariat") {
@@ -1442,7 +1545,6 @@ export default function HomePage() {
                 <label><span>Статус</span><select value={activeFilter} onChange={(e) => setActiveFilter(e.target.value)}><option value="active">Работающие</option><option value="dismissed">Уволенные</option><option value="all">Все</option></select></label>
                 <label><span>Подразделение</span><select value={departmentFilter} onChange={(e) => setDepartmentFilter(e.target.value)}><option value="">Все</option>{uniqueValues(employees, "department").map((value) => <option key={value}>{value}</option>)}</select></label>
                 <label><span>Военкомат</span><select value={commissariatFilter} onChange={(e) => setCommissariatFilter(e.target.value)}><option value="">Все</option>{uniqueValues(employees, "militaryCommissariat").map((value) => <option key={value}>{value}</option>)}</select></label>
-                <label><span>Вид учёта</span><select value={accountFilter} onChange={(e) => setAccountFilter(e.target.value)}><option value="">Все</option><option value="general">Общий</option><option value="special">Специальный</option></select></label>
                 <label><span>Карточка</span><select value={attentionFilter} onChange={(e) => setAttentionFilter(e.target.value)}><option value="">Все</option><option value="missing">Есть пропуски</option></select></label>
               </div>
               {filteredEmployees.length ? (
@@ -1507,7 +1609,7 @@ export default function HomePage() {
 
           {view === "documents" ? (
             <>
-              <section className="section-heading compact"><div><span className="eyebrow">Word и PDF</span><h2>Формирование документов</h2><p>Документы заполняются из карточки сотрудника.</p></div></section>
+              <section className="section-heading compact"><div><span className="eyebrow">Word и PDF</span><h2>Формирование документов</h2><p>Основной формат — редактируемый Word. PDF формируется готовым для печати.</p></div></section>
               <div className="document-layout">
                 <section className="data-panel document-builder">
                   <h3>Параметры документа</h3>
@@ -1519,7 +1621,11 @@ export default function HomePage() {
                     const missing = employee ? getMissingFields(employee) : [];
                     return missing.length ? <div className="inline-warning"><AlertCircle size={18} /><span><strong>Перед выгрузкой проверьте карточку</strong>Не заполнено: {missing.slice(0,5).join(", ")}{missing.length > 5 ? ` и ещё ${missing.length-5}` : ""}.</span></div> : <div className="inline-success"><Check size={18} /> Основные поля заполнены</div>;
                   })() : null}
-                  <div className="builder-actions"><button className="button primary" onClick={downloadWord} disabled={!documentEmployeeId}><FileDown size={18} /> Скачать Word</button><button className="button secondary" onClick={printDocument} disabled={!documentEmployeeId}><Printer size={18} /> Печать / PDF</button></div>
+                  <div className="builder-actions">
+                    <button className="button ghost" onClick={() => { const employee = employees.find((item) => item.id === documentEmployeeId); if (employee) setEmployeeModal(employee); }} disabled={!documentEmployeeId}><Pencil size={17} /> Редактировать данные</button>
+                    <button className="button primary" onClick={downloadWord} disabled={!documentEmployeeId}><FileDown size={18} /> Скачать Word</button>
+                    <button className="button secondary" onClick={downloadPdf} disabled={!documentEmployeeId}><Printer size={18} /> Скачать PDF</button>
+                  </div>
                 </section>
                 <section className="document-preview-card">
                   <div className="paper-preview">
