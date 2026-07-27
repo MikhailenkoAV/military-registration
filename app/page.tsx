@@ -1144,7 +1144,8 @@ export default function HomePage() {
   function currentDocument() {
     const employee = employees.find((item) => item.id === documentEmployeeId);
     if (!employee) return null;
-    const assetBase = window.location.origin;
+    const assetBase =
+      window.location.origin + (process.env.NEXT_PUBLIC_BASE_PATH ?? "");
     return {
       employee,
       html:
