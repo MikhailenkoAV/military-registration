@@ -44,6 +44,8 @@ type View =
   | "reconciliations"
   | "settings";
 
+type DocumentType = "form10" | "f2" | "messageSheet";
+
 type Employee = {
   id: string;
   fullName: string;
@@ -113,7 +115,7 @@ type Notice = {
 type DocumentRecord = {
   id: string;
   employeeId: string;
-  type: "form10" | "f2";
+  type: DocumentType;
   createdAt: string;
   title: string;
 };
@@ -590,6 +592,7 @@ function documentValues(
     FULL_NAME: employee.fullName,
     EMPLOYEE_NAME: employee.fullName,
     BIRTH_DATE: formatDate(employee.birthDate, ""),
+    BIRTH_YEAR: employee.birthDate ? employee.birthDate.slice(0, 4) : "",
     BIRTH_PLACE: employee.birthPlace,
     EDUCATION: employee.education,
     EDUCATION_ORG: "",
@@ -639,6 +642,7 @@ function documentValues(
     MILITARY_DOCUMENT: militaryDocument,
     ORDER_DETAILS: `${formatDate(employee.orderDate, "")}${employee.orderNumber ? ` № ${employee.orderNumber}` : ""}`,
     POSITION: employee.position,
+    DEPARTMENT: employee.department,
     OUTGOING_DETAILS: "",
     RESPONSIBLE_POSITION: settings.responsiblePosition,
     RESPONSIBLE_NAME: settings.responsibleName,
@@ -659,12 +663,17 @@ function documentValues(
 async function buildDocx(
   employee: Employee,
   settings: OrganizationSettings,
-  type: "form10" | "f2",
+  type: DocumentType,
   eventType: "hire" | "dismissal",
   f2OrderNumber: string,
   f2OrderDate: string,
 ) {
-  const response = await fetch(assetUrl(type === "form10" ? "form10-template.docx" : "f2-template.docx"));
+  const templateName = type === "form10"
+    ? "form10-template.docx"
+    : type === "f2"
+      ? "f2-template.docx"
+      : "message-sheet-template.docx";
+  const response = await fetch(assetUrl(templateName));
   if (!response.ok) throw new Error("Не удалось загрузить шаблон Word");
   const archive = unzipSync(new Uint8Array(await response.arrayBuffer()));
   const values = documentValues(employee, settings, eventType, f2OrderNumber, f2OrderDate);
@@ -808,7 +817,7 @@ export default function HomePage() {
   const [noticeSearch, setNoticeSearch] = useState("");
   const [noticeFilter, setNoticeFilter] = useState("open");
   const [documentEmployeeId, setDocumentEmployeeId] = useState("");
-  const [documentType, setDocumentType] = useState<"form10" | "f2">("form10");
+  const [documentType, setDocumentType] = useState<DocumentType>("form10");
   const [f2Event, setF2Event] = useState<"hire" | "dismissal">("hire");
   const [f2OrderNumber, setF2OrderNumber] = useState("");
   const [f2OrderDate, setF2OrderDate] = useState("");
@@ -1196,14 +1205,18 @@ export default function HomePage() {
     );
   }
 
-  function recordDocument(employee: Employee, type: "form10" | "f2") {
+  function recordDocument(employee: Employee, type: DocumentType) {
     setDocuments((current) => [
       {
         id: makeId(),
         employeeId: employee.id,
         type,
         createdAt: new Date().toISOString(),
-        title: type === "form10" ? "Форма № 10" : `Справка Ф-2 — ${f2Event === "hire" ? "приём" : "увольнение"}`,
+        title: type === "form10"
+          ? "Форма № 10"
+          : type === "f2"
+            ? `Справка Ф-2 — ${f2Event === "hire" ? "приём" : "увольнение"}`
+            : "Листок сообщений",
       },
       ...current,
     ]);
@@ -1231,7 +1244,7 @@ export default function HomePage() {
       );
       downloadBlob(
         blob,
-        `${documentType === "form10" ? "Форма-10" : "Справка-Ф-2"}_${employee.fullName.replaceAll(" ", "_")}.docx`,
+        `${documentType === "form10" ? "Форма-10" : documentType === "f2" ? "Справка-Ф-2" : "Листок-сообщений"}_${employee.fullName.replaceAll(" ", "_")}.docx`,
       );
       recordDocument(employee, documentType);
       setToast("Редактируемый Word подготовлен.");
@@ -1542,12 +1555,12 @@ export default function HomePage() {
 
           {view === "documents" ? (
             <>
-              <section className="section-heading compact"><div><span className="eyebrow">Редактируемый Word</span><h2>Формирование документов</h2><p>Форма № 10 и справка Ф-2 выгружаются заполненными в формате DOCX.</p></div></section>
+              <section className="section-heading compact"><div><span className="eyebrow">Редактируемый Word</span><h2>Формирование документов</h2><p>Форма № 10, справка Ф-2 и «Листок сообщений» выгружаются заполненными в формате DOCX.</p></div></section>
               <div className="document-layout">
                 <section className="data-panel document-builder">
                   <h3>Параметры документа</h3>
                   <label className="field"><span>Сотрудник</span><select value={documentEmployeeId} onChange={(e) => setDocumentEmployeeId(e.target.value)}><option value="">Выберите сотрудника</option>{employees.slice().sort((a,b)=>a.fullName.localeCompare(b.fullName,"ru")).map((employee)=><option value={employee.id} key={employee.id}>{employee.fullName}</option>)}</select></label>
-                  <div className="segmented"><button className={documentType === "form10" ? "active" : ""} onClick={() => setDocumentType("form10")}>Форма № 10</button><button className={documentType === "f2" ? "active" : ""} onClick={() => setDocumentType("f2")}>Справка Ф-2</button></div>
+                  <div className="segmented"><button className={documentType === "form10" ? "active" : ""} onClick={() => setDocumentType("form10")}>Форма № 10</button><button className={documentType === "f2" ? "active" : ""} onClick={() => setDocumentType("f2")}>Справка Ф-2</button><button className={documentType === "messageSheet" ? "active" : ""} onClick={() => setDocumentType("messageSheet")}>Листок сообщений</button></div>
                   {documentType === "f2" ? <div className="f2-options">
                     <fieldset className="event-checklist"><legend>Отметка в справке</legend>
                       <label><input type="radio" name="f2-event" checked={f2Event==="hire"} onChange={()=>setF2Event("hire")}/><span>Принят (поступил) на работу</span></label>
@@ -1571,11 +1584,11 @@ export default function HomePage() {
                 </section>
                 <section className="document-preview-card">
                   <div className="paper-preview">
-                    <span>{documentType === "form10" ? "Форма № 10" : "СВЕДЕНИЯ"}</span>
+                    <span>{documentType === "form10" ? "Форма № 10" : documentType === "f2" ? "СВЕДЕНИЯ" : "ЛИСТОК СООБЩЕНИЯ"}</span>
                     <strong>{documentEmployeeId ? employees.find((item) => item.id === documentEmployeeId)?.fullName : "Выберите сотрудника"}</strong>
                     <div>{Array.from({ length: 10 }).map((_, index) => <i key={index} />)}</div>
                   </div>
-                  <p>{documentType === "form10" ? "Две страницы A4: лицевая и оборотная стороны." : "Одна страница A4 по приложению № 2 к Положению о воинском учёте."}</p>
+                  <p>{documentType === "form10" ? "Две страницы A4: лицевая и оборотная стороны." : documentType === "f2" ? "Одна страница A4 по приложению № 2 к Положению о воинском учёте." : "Одна страница A4 с корешком по представленному образцу."}</p>
                 </section>
               </div>
               {documents.length ? <section className="history-section"><h3>Последние сформированные документы</h3><div className="data-panel history-list">{documents.slice(0,8).map((document) => <div key={document.id}><FileText size={17}/><span><strong>{document.title}</strong><small>{employees.find((employee)=>employee.id===document.employeeId)?.fullName ?? "Карточка удалена"}</small></span><time>{new Intl.DateTimeFormat("ru-RU",{dateStyle:"short",timeStyle:"short"}).format(new Date(document.createdAt))}</time></div>)}</div></section> : null}
