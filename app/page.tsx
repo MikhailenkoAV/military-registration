@@ -547,8 +547,7 @@ function familyRows(value: string): FamilyMember[] {
         parts.length === 1 ? ["", parts[0], ""] : parts;
       return { relation, fullName, birthDate };
     })
-    .filter((item) => item.relation || item.fullName || item.birthDate)
-    .slice(0, 4);
+    .filter((item) => item.relation || item.fullName || item.birthDate);
 }
 
 function serializeFamilyRows(rows: FamilyMember[]) {
@@ -582,9 +581,23 @@ function documentValues(
 ) {
   const family = familyRows(employee.familyMembers);
   const isMarried = /состоит в зарегистрированном браке|женат|замужем/i.test(employee.maritalStatus);
+  const isNotMarried = /не состоит в браке|не замужем|не женат/i.test(employee.maritalStatus);
+  const isDivorcedOrWidowed = /развед|вдов/i.test(employee.maritalStatus);
   const wife = isMarried
     ? family.find((item) => /^(жена|супруга)$/i.test(item.relation.trim()))
     : undefined;
+  const mother = isNotMarried
+    ? family.find((item) => /^мать$/i.test(item.relation.trim()))
+    : undefined;
+  const father = isNotMarried
+    ? family.find((item) => /^отец$/i.test(item.relation.trim()))
+    : undefined;
+  const children = isDivorcedOrWidowed
+    ? family.filter((item) => /^(сын|дочь)$/i.test(item.relation.trim()))
+    : [];
+  const familyDetail = (item?: FamilyMember) => item
+    ? [item.fullName, item.birthDate ? `${item.birthDate.slice(0, 4)} г.р.` : ""].filter(Boolean).join(", ")
+    : "";
   const languages = employee.languages.split(/[;,]/).map((item) => item.trim()).filter(Boolean);
   const orderDate = parseLocalDate(f2OrderDate || employee.orderDate);
   const monthNames = [
@@ -618,7 +631,10 @@ function documentValues(
     PROFESSION: employee.profession,
     ADDITIONAL_PROFESSION: "",
     MARITAL_STATUS: employee.maritalStatus,
-    WIFE_FULL_NAME: wife?.fullName ?? "",
+    WIFE_DETAILS: familyDetail(wife),
+    MOTHER_DETAILS: familyDetail(mother),
+    FATHER_DETAILS: familyDetail(father),
+    CHILDREN_DETAILS: children.map((item) => `${item.relation}: ${familyDetail(item)}`).join("; "),
     FAMILY_REL_1: family[0]?.relation ?? "",
     FAMILY_PERSON_1: family[0] ? [family[0].fullName, formatDate(family[0].birthDate, "")].filter(Boolean).join(", ") : "",
     FAMILY_REL_2: family[1]?.relation ?? "",
