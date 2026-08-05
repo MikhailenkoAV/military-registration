@@ -645,7 +645,8 @@ select:focus-visible {
 .filter-panel input,
 .filter-panel select,
 .field input,
-.field select {
+.field select,
+.field textarea {
   width: 100%;
   height: 42px;
   border: 1px solid var(--border);
@@ -661,6 +662,20 @@ select:focus-visible {
 .field input:focus,
 .field select:focus {
   border-color: var(--teal);
+  box-shadow: 0 0 0 3px rgba(15, 143, 157, 0.12);
+}
+
+.field textarea {
+  min-height: 82px;
+  resize: vertical;
+  padding: 10px 11px;
+  font: inherit;
+  line-height: 1.4;
+}
+
+.field textarea:focus {
+  border-color: var(--teal);
+  outline: 0;
   box-shadow: 0 0 0 3px rgba(15, 143, 157, 0.12);
 }
 
@@ -911,6 +926,40 @@ select:focus-visible {
   background: #fff;
   color: var(--teal-dark);
   box-shadow: 0 1px 4px rgba(23, 32, 51, 0.1);
+}
+
+.document-types {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.change-document-options,
+.change-entry-list {
+  display: grid;
+  gap: 12px;
+}
+
+.change-employee-add {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: end;
+  gap: 10px;
+}
+
+.change-entry {
+  display: grid;
+  gap: 8px;
+  border: 1px solid var(--border);
+  border-radius: 9px;
+  background: #f8fafb;
+  padding: 12px;
+}
+
+.change-entry > div {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  font-size: 13px;
 }
 
 .f2-options {

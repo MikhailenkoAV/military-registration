@@ -44,8 +44,13 @@ type View =
   | "reconciliations"
   | "settings";
 
-type DocumentType = "form10" | "f2" | "messageSheet";
+type DocumentType = "form10" | "f2" | "messageSheet" | "changes" | "employmentNotice";
 type DocumentHeaderLocation = "moscow" | "sochi";
+
+type ChangeDocumentEntry = {
+  employeeId: string;
+  content: string;
+};
 
 type Employee = {
   id: string;
@@ -130,6 +135,7 @@ type OrganizationSettings = {
   directorName: string;
   responsiblePosition: string;
   responsibleName: string;
+  responsiblePhone: string;
   defaultCommissariat: string;
   defaultCommissariatAddress: string;
   extraHolidays: string;
@@ -280,6 +286,7 @@ const emptySettings: OrganizationSettings = {
   directorName: "",
   responsiblePosition: "Специалист по ведению воинского учёта",
   responsibleName: "Михайленко А.В.",
+  responsiblePhone: "",
   defaultCommissariat: "",
   defaultCommissariatAddress: "",
   extraHolidays: "",
@@ -660,9 +667,12 @@ function documentValues(
     OUTGOING_DETAILS: "",
     RESPONSIBLE_POSITION: settings.responsiblePosition,
     RESPONSIBLE_NAME: settings.responsibleName,
+    RESPONSIBLE_PHONE: settings.responsiblePhone,
     SNILS: employee.snils,
     EVENT_HIRE: "принят (поступил) на работу",
     EVENT_DISMISSAL: "уволен с работы (отчислен из образовательной организации)",
+    NOTICE_EVENT_HIRE: "принят (поступил)",
+    NOTICE_EVENT_DISMISSAL: "уволен с работы (отчислен из образовательной организации)",
     HIRE_STRIKE: eventType === "hire" ? "0" : "1",
     DISMISSAL_STRIKE: eventType === "dismissal" ? "0" : "1",
     ORDER_NUMBER: f2OrderNumber || employee.orderNumber,
@@ -687,6 +697,8 @@ async function buildDocx(
     ? "form10-template.docx"
     : type === "f2"
       ? "f2-template.docx"
+      : type === "employmentNotice"
+        ? "employment-notice-template.docx"
       : "message-sheet-template.docx";
   const response = await fetch(assetUrl(templateName));
   if (!response.ok) throw new Error("Не удалось загрузить шаблон Word");
@@ -701,6 +713,58 @@ async function buildDocx(
     xml = xml.replace(/\{\{[A-Z0-9_]+\}\}/g, "");
     archive[path] = strToU8(xml);
   }
+  return new Blob([zipSync(archive, { level: 6 }) as BlobPart], {
+    type: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+  });
+}
+
+async function buildChangesDocx(
+  entries: ChangeDocumentEntry[],
+  employees: Employee[],
+  settings: OrganizationSettings,
+  headerLocation: DocumentHeaderLocation,
+) {
+  const response = await fetch(assetUrl("changes-template.docx"));
+  if (!response.ok) throw new Error("Не удалось загрузить шаблон Word");
+  const archive = unzipSync(new Uint8Array(await response.arrayBuffer()));
+  const documentPath = "word/document.xml";
+  let xml = strFromU8(archive[documentPath]);
+  const marker = "{{CHANGE_ROW_NUMBER}}";
+  const markerIndex = xml.indexOf(marker);
+  if (markerIndex < 0) throw new Error("В шаблоне отсутствует строка сведений");
+  const rowMatches = Array.from(xml.slice(0, markerIndex).matchAll(/<w:tr(?=[\s>])/g));
+  const rowStart = rowMatches.at(-1)?.index ?? -1;
+  const rowEnd = xml.indexOf("</w:tr>", markerIndex) + "</w:tr>".length;
+  if (rowStart < 0 || rowEnd < rowStart) throw new Error("Не удалось прочитать строку сведений");
+  const rowTemplate = xml.slice(rowStart, rowEnd);
+  const rows = entries.map((entry, index) => {
+    const employee = employees.find((item) => item.id === entry.employeeId);
+    if (!employee) return "";
+    const rowValues: Record<string, string> = {
+      CHANGE_ROW_NUMBER: String(index + 1),
+      CHANGE_FULL_NAME: employee.fullName,
+      CHANGE_MILITARY_RANK: employee.militaryRank,
+      CHANGE_BIRTH_YEAR: employee.birthDate ? employee.birthDate.slice(0, 4) : "",
+      CHANGE_ACCOUNT: "Общий",
+      CHANGE_CONTENT: entry.content,
+      CHANGE_NOTE: "",
+    };
+    let row = rowTemplate;
+    for (const [key, value] of Object.entries(rowValues)) {
+      row = row.replaceAll(`{{${key}}}`, xmlValue(value));
+    }
+    return row;
+  }).join("");
+  xml = `${xml.slice(0, rowStart)}${rows}${xml.slice(rowEnd)}`;
+
+  const firstEmployee = employees.find((item) => item.id === entries[0]?.employeeId);
+  if (!firstEmployee) throw new Error("Не выбран сотрудник");
+  const values = documentValues(firstEmployee, settings, "hire", "", "", headerLocation);
+  for (const [key, value] of Object.entries(values)) {
+    xml = xml.replaceAll(`{{${key}}}`, xmlValue(value));
+  }
+  xml = xml.replace(/\{\{[A-Z0-9_]+\}\}/g, "");
+  archive[documentPath] = strToU8(xml);
   return new Blob([zipSync(archive, { level: 6 }) as BlobPart], {
     type: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
   });
@@ -842,6 +906,8 @@ export default function HomePage() {
   const [f2OrderNumber, setF2OrderNumber] = useState("");
   const [f2OrderDate, setF2OrderDate] = useState("");
   const [documentHeaderLocation, setDocumentHeaderLocation] = useState<DocumentHeaderLocation>("moscow");
+  const [changeEmployeeToAdd, setChangeEmployeeToAdd] = useState("");
+  const [changeDocumentEntries, setChangeDocumentEntries] = useState<ChangeDocumentEntry[]>([]);
   const [reconciliationSearch, setReconciliationSearch] = useState("");
   const [reconciliationFilter, setReconciliationFilter] = useState("attention");
   const excelInput = useRef<HTMLInputElement>(null);
@@ -1238,19 +1304,44 @@ export default function HomePage() {
           ? "Форма № 10"
           : type === "f2"
             ? `Справка Ф-2 — ${f2Event === "hire" ? "приём" : "увольнение"}`
-            : "Листок сообщений",
+            : type === "messageSheet"
+              ? "Листок сообщений"
+              : type === "changes"
+                ? "Сведения об изменениях"
+                : `Сведения о принятых/уволенных — ${f2Event === "hire" ? "приём" : "увольнение"}`,
       },
       ...current,
     ]);
   }
 
   async function downloadWord() {
+    if (documentType === "changes") {
+      if (!changeDocumentEntries.length) {
+        setToast("Добавьте хотя бы одного сотрудника.");
+        return;
+      }
+      if (changeDocumentEntries.some((entry) => !entry.content.trim())) {
+        setToast("Заполните содержание изменений для каждого сотрудника.");
+        return;
+      }
+      try {
+        setToast("Формируются сведения об изменениях…");
+        const blob = await buildChangesDocx(changeDocumentEntries, employees, organization, documentHeaderLocation);
+        downloadBlob(blob, "Сведения_об_изменениях.docx");
+        const firstEmployee = employees.find((item) => item.id === changeDocumentEntries[0].employeeId);
+        if (firstEmployee) recordDocument(firstEmployee, documentType);
+        setToast("Редактируемый Word подготовлен.");
+      } catch {
+        setToast("Не удалось сформировать Word. Проверьте шаблон и повторите попытку.");
+      }
+      return;
+    }
     const employee = employees.find((item) => item.id === documentEmployeeId);
     if (!employee) {
       setToast("Выберите сотрудника.");
       return;
     }
-    if (documentType === "f2" && (!f2OrderNumber.trim() || !f2OrderDate)) {
+    if ((documentType === "f2" || documentType === "employmentNotice") && (!f2OrderNumber.trim() || !f2OrderDate)) {
       setToast("Для справки Ф-2 укажите номер и дату приказа (трудового договора).");
       return;
     }
@@ -1267,7 +1358,7 @@ export default function HomePage() {
       );
       downloadBlob(
         blob,
-        `${documentType === "form10" ? "Форма-10" : documentType === "f2" ? "Справка-Ф-2" : "Листок-сообщений"}_${employee.fullName.replaceAll(" ", "_")}.docx`,
+        `${documentType === "form10" ? "Форма-10" : documentType === "f2" ? "Справка-Ф-2" : documentType === "messageSheet" ? "Листок-сообщений" : "Сведения-о-принятых-уволенных"}_${employee.fullName.replaceAll(" ", "_")}.docx`,
       );
       recordDocument(employee, documentType);
       setToast("Редактируемый Word подготовлен.");
@@ -1582,9 +1673,14 @@ export default function HomePage() {
               <div className="document-layout">
                 <section className="data-panel document-builder">
                   <h3>Параметры документа</h3>
-                  <label className="field"><span>Сотрудник</span><select value={documentEmployeeId} onChange={(e) => setDocumentEmployeeId(e.target.value)}><option value="">Выберите сотрудника</option>{employees.slice().sort((a,b)=>a.fullName.localeCompare(b.fullName,"ru")).map((employee)=><option value={employee.id} key={employee.id}>{employee.fullName}</option>)}</select></label>
-                  <div className="segmented"><button className={documentType === "form10" ? "active" : ""} onClick={() => setDocumentType("form10")}>Форма № 10</button><button className={documentType === "f2" ? "active" : ""} onClick={() => setDocumentType("f2")}>Справка Ф-2</button><button className={documentType === "messageSheet" ? "active" : ""} onClick={() => setDocumentType("messageSheet")}>Листок сообщений</button></div>
-                  {documentType === "f2" ? <div className="f2-options">
+                  {documentType !== "changes" ? <label className="field"><span>Сотрудник</span><select value={documentEmployeeId} onChange={(e) => setDocumentEmployeeId(e.target.value)}><option value="">Выберите сотрудника</option>{employees.slice().sort((a,b)=>a.fullName.localeCompare(b.fullName,"ru")).map((employee)=><option value={employee.id} key={employee.id}>{employee.fullName}</option>)}</select></label> : null}
+                  <div className="segmented document-types"><button className={documentType === "form10" ? "active" : ""} onClick={() => setDocumentType("form10")}>Форма № 10</button><button className={documentType === "f2" ? "active" : ""} onClick={() => setDocumentType("f2")}>Справка Ф-2</button><button className={documentType === "messageSheet" ? "active" : ""} onClick={() => setDocumentType("messageSheet")}>Листок сообщений</button><button className={documentType === "changes" ? "active" : ""} onClick={() => setDocumentType("changes")}>Изменение данных</button><button className={documentType === "employmentNotice" ? "active" : ""} onClick={() => setDocumentType("employmentNotice")}>Принятие / увольнение</button></div>
+                  {documentType === "changes" ? <div className="change-document-options">
+                    <label className="field"><span>Шапка документа</span><select value={documentHeaderLocation} onChange={(event) => setDocumentHeaderLocation(event.target.value as DocumentHeaderLocation)}><option value="moscow">Москва</option><option value="sochi">Сочи</option></select></label>
+                    <div className="change-employee-add"><label className="field"><span>Добавить сотрудника</span><select value={changeEmployeeToAdd} onChange={(event)=>setChangeEmployeeToAdd(event.target.value)}><option value="">Выберите сотрудника</option>{employees.filter((employee)=>!changeDocumentEntries.some((entry)=>entry.employeeId===employee.id)).slice().sort((a,b)=>a.fullName.localeCompare(b.fullName,"ru")).map((employee)=><option value={employee.id} key={employee.id}>{employee.fullName}</option>)}</select></label><button type="button" className="button secondary" disabled={!changeEmployeeToAdd} onClick={()=>{setChangeDocumentEntries([...changeDocumentEntries,{employeeId:changeEmployeeToAdd,content:""}]);setChangeEmployeeToAdd("");}}><Plus size={16}/> Добавить</button></div>
+                    <div className="change-entry-list">{changeDocumentEntries.map((entry)=>{const employee=employees.find((item)=>item.id===entry.employeeId);return <div className="change-entry" key={entry.employeeId}><div><strong>{employee?.fullName}</strong><button type="button" className="icon-button" aria-label="Удалить сотрудника из документа" onClick={()=>setChangeDocumentEntries(changeDocumentEntries.filter((item)=>item.employeeId!==entry.employeeId))}><Trash2 size={16}/></button></div><label className="field"><span>Содержание изменений</span><textarea value={entry.content} placeholder="Например: изменение места пребывания…" onChange={(event)=>setChangeDocumentEntries(changeDocumentEntries.map((item)=>item.employeeId===entry.employeeId?{...item,content:event.target.value}:item))}/></label></div>})}</div>
+                  </div> : null}
+                  {documentType === "f2" || documentType === "employmentNotice" ? <div className="f2-options">
                     <label className="field"><span>Шапка документа</span><select value={documentHeaderLocation} onChange={(event) => setDocumentHeaderLocation(event.target.value as DocumentHeaderLocation)}><option value="moscow">Москва</option><option value="sochi">Сочи</option></select></label>
                     <fieldset className="event-checklist"><legend>Отметка в справке</legend>
                       <label><input type="radio" name="f2-event" checked={f2Event==="hire"} onChange={()=>setF2Event("hire")}/><span>Принят (поступил) на работу</span></label>
@@ -1596,23 +1692,23 @@ export default function HomePage() {
                       <Field required type="date" label="Дата приказа (трудового договора)" value={f2OrderDate} onChange={setF2OrderDate}/>
                     </div>
                   </div> : null}
-                  {documentEmployeeId ? (() => {
+                  {documentType !== "changes" && documentEmployeeId ? (() => {
                     const employee = employees.find((item) => item.id === documentEmployeeId);
                     const missing = employee ? getMissingFields(employee) : [];
                     return missing.length ? <div className="inline-warning"><AlertCircle size={18} /><span><strong>Перед выгрузкой проверьте карточку</strong>Не заполнено: {missing.slice(0,5).join(", ")}{missing.length > 5 ? ` и ещё ${missing.length-5}` : ""}.</span></div> : <div className="inline-success"><Check size={18} /> Основные поля заполнены</div>;
                   })() : null}
                   <div className="builder-actions">
-                    <button className="button ghost" onClick={() => { const employee = employees.find((item) => item.id === documentEmployeeId); if (employee) setEmployeeModal(employee); }} disabled={!documentEmployeeId}><Pencil size={17} /> Редактировать данные</button>
-                    <button className="button primary" onClick={downloadWord} disabled={!documentEmployeeId}><FileDown size={18} /> Скачать Word</button>
+                    <button className="button ghost" onClick={() => { const employee = employees.find((item) => item.id === documentEmployeeId); if (employee) setEmployeeModal(employee); }} disabled={documentType === "changes" || !documentEmployeeId}><Pencil size={17} /> Редактировать данные</button>
+                    <button className="button primary" onClick={downloadWord} disabled={documentType === "changes" ? !changeDocumentEntries.length : !documentEmployeeId}><FileDown size={18} /> Скачать Word</button>
                   </div>
                 </section>
                 <section className="document-preview-card">
                   <div className="paper-preview">
-                    <span>{documentType === "form10" ? "Форма № 10" : documentType === "f2" ? "СВЕДЕНИЯ" : "ЛИСТОК СООБЩЕНИЯ"}</span>
-                    <strong>{documentEmployeeId ? employees.find((item) => item.id === documentEmployeeId)?.fullName : "Выберите сотрудника"}</strong>
+                    <span>{documentType === "form10" ? "Форма № 10" : documentType === "f2" || documentType === "employmentNotice" ? "СВЕДЕНИЯ" : documentType === "changes" ? "СВЕДЕНИЯ ОБ ИЗМЕНЕНИЯХ" : "ЛИСТОК СООБЩЕНИЯ"}</span>
+                    <strong>{documentType === "changes" ? `${changeDocumentEntries.length} сотрудник(а)` : documentEmployeeId ? employees.find((item) => item.id === documentEmployeeId)?.fullName : "Выберите сотрудника"}</strong>
                     <div>{Array.from({ length: 10 }).map((_, index) => <i key={index} />)}</div>
                   </div>
-                  <p>{documentType === "form10" ? "Две страницы A4: лицевая и оборотная стороны." : documentType === "f2" ? "Одна страница A4 по приложению № 2 к Положению о воинском учёте." : "Одна страница A4 с корешком по представленному образцу."}</p>
+                  <p>{documentType === "form10" ? "Две страницы A4: лицевая и оборотная стороны." : documentType === "f2" || documentType === "employmentNotice" ? "Одна страница A4: сведения о принятии или увольнении." : documentType === "changes" ? "Групповой документ: одна строка на каждого выбранного сотрудника." : "Одна страница A4 с корешком по представленному образцу."}</p>
                 </section>
               </div>
               {documents.length ? <section className="history-section"><h3>Последние сформированные документы</h3><div className="data-panel history-list">{documents.slice(0,8).map((document) => <div key={document.id}><FileText size={17}/><span><strong>{document.title}</strong><small>{employees.find((employee)=>employee.id===document.employeeId)?.fullName ?? "Карточка удалена"}</small></span><time>{new Intl.DateTimeFormat("ru-RU",{dateStyle:"short",timeStyle:"short"}).format(new Date(document.createdAt))}</time></div>)}</div></section> : null}
@@ -1656,6 +1752,7 @@ export default function HomePage() {
                     <Field label="Ф.И.О. руководителя" value={organization.directorName} onChange={(value)=>setOrganization({...organization,directorName:value})}/>
                     <Field label="Должность специалиста по воинскому учёту" value={organization.responsiblePosition} onChange={(value)=>setOrganization({...organization,responsiblePosition:value})}/>
                     <Field label="Ф.И.О. специалиста по воинскому учёту" value={organization.responsibleName} onChange={(value)=>setOrganization({...organization,responsibleName:value})}/>
+                    <Field label="Телефон специалиста по воинскому учёту" value={organization.responsiblePhone} onChange={(value)=>setOrganization({...organization,responsiblePhone:value})}/>
                     <Field label="Военкомат по умолчанию" value={organization.defaultCommissariat} onChange={(value)=>setOrganization({...organization,defaultCommissariat:value})}/>
                     <Field label="Адрес военкомата" value={organization.defaultCommissariatAddress} onChange={(value)=>setOrganization({...organization,defaultCommissariatAddress:value})}/>
                     <Field label="Дополнительные нерабочие дни" value={organization.extraHolidays} placeholder="2026-04-20, 2026-09-01" help="Укажите даты через запятую. Они будут исключены при расчёте сроков в рабочих днях." onChange={(value)=>setOrganization({...organization,extraHolidays:value})}/>
