@@ -45,6 +45,7 @@ type View =
   | "settings";
 
 type DocumentType = "form10" | "f2" | "messageSheet";
+type DocumentHeaderLocation = "moscow" | "sochi";
 
 type Employee = {
   id: string;
@@ -570,8 +571,13 @@ function documentValues(
   eventType: "hire" | "dismissal",
   f2OrderNumber: string,
   f2OrderDate: string,
+  headerLocation: DocumentHeaderLocation,
 ) {
   const family = familyRows(employee.familyMembers);
+  const isMarried = /состоит в зарегистрированном браке|женат|замужем/i.test(employee.maritalStatus);
+  const wife = isMarried
+    ? family.find((item) => /^(жена|супруга)$/i.test(item.relation.trim()))
+    : undefined;
   const languages = employee.languages.split(/[;,]/).map((item) => item.trim()).filter(Boolean);
   const orderDate = parseLocalDate(f2OrderDate || employee.orderDate);
   const monthNames = [
@@ -605,6 +611,7 @@ function documentValues(
     PROFESSION: employee.profession,
     ADDITIONAL_PROFESSION: "",
     MARITAL_STATUS: employee.maritalStatus,
+    WIFE_FULL_NAME: wife?.fullName ?? "",
     FAMILY_REL_1: family[0]?.relation ?? "",
     FAMILY_PERSON_1: family[0] ? [family[0].fullName, formatDate(family[0].birthDate, "")].filter(Boolean).join(", ") : "",
     FAMILY_REL_2: family[1]?.relation ?? "",
@@ -635,6 +642,10 @@ function documentValues(
     RESERVE_CATEGORY: employee.reserveCategory,
     COMMISSARIAT: employee.militaryCommissariat || settings.defaultCommissariat,
     COMMISSARIAT_SHORT: employee.militaryCommissariat || settings.defaultCommissariat,
+    HEADER_AUTHORITY_TYPE: headerLocation === "sochi" ? "городского округа" : "военного",
+    HEADER_AUTHORITY_NAME: headerLocation === "sochi"
+      ? "город-курорт Сочи Краснодарского края"
+      : "комиссариата г. Москва",
     MILITARY_RANK: employee.militaryRank,
     COMPOSITION_PROFILE: [employee.composition, employee.profile].filter(Boolean).join(" / "),
     TEAM_NUMBER: "",
@@ -670,6 +681,7 @@ async function buildDocx(
   eventType: "hire" | "dismissal",
   f2OrderNumber: string,
   f2OrderDate: string,
+  headerLocation: DocumentHeaderLocation,
 ) {
   const templateName = type === "form10"
     ? "form10-template.docx"
@@ -679,7 +691,7 @@ async function buildDocx(
   const response = await fetch(assetUrl(templateName));
   if (!response.ok) throw new Error("Не удалось загрузить шаблон Word");
   const archive = unzipSync(new Uint8Array(await response.arrayBuffer()));
-  const values = documentValues(employee, settings, eventType, f2OrderNumber, f2OrderDate);
+  const values = documentValues(employee, settings, eventType, f2OrderNumber, f2OrderDate, headerLocation);
   for (const [path, content] of Object.entries(archive)) {
     if (!path.startsWith("word/") || !path.endsWith(".xml")) continue;
     let xml = strFromU8(content);
@@ -745,6 +757,7 @@ function FamilyMembersEditor({
   value: string;
   onChange: (value: string) => void;
 }) {
+  const relationshipOptions = ["Отец", "Мать", "Жена", "Сын", "Дочь", "Сестра", "Брат"];
   const [rows, setRows] = useState<FamilyMember[]>(() => {
     const parsed = familyRows(value);
     return parsed.length ? parsed : [{ relation: "", fullName: "", birthDate: "" }];
@@ -784,7 +797,11 @@ function FamilyMembersEditor({
       </div>
       {rows.map((row, index) => (
         <div className="family-row" key={index}>
-          <input value={row.relation} placeholder="Супруг(а), сын…" onChange={(event) => updateRow(index, { relation: event.target.value })} />
+          <select value={row.relation} aria-label="Степень родства" onChange={(event) => updateRow(index, { relation: event.target.value })}>
+            <option value="">Выберите</option>
+            {row.relation && !relationshipOptions.includes(row.relation) ? <option value={row.relation}>{row.relation}</option> : null}
+            {relationshipOptions.map((relation) => <option value={relation} key={relation}>{relation}</option>)}
+          </select>
           <input value={row.fullName} placeholder="Фамилия Имя Отчество" onChange={(event) => updateRow(index, { fullName: event.target.value })} />
           <input type="date" value={row.birthDate} onChange={(event) => updateRow(index, { birthDate: event.target.value })} />
           <button type="button" className="icon-button" aria-label="Удалить члена семьи" onClick={() => removeRow(index)}><Trash2 size={16} /></button>
@@ -824,6 +841,7 @@ export default function HomePage() {
   const [f2Event, setF2Event] = useState<"hire" | "dismissal">("hire");
   const [f2OrderNumber, setF2OrderNumber] = useState("");
   const [f2OrderDate, setF2OrderDate] = useState("");
+  const [documentHeaderLocation, setDocumentHeaderLocation] = useState<DocumentHeaderLocation>("moscow");
   const [reconciliationSearch, setReconciliationSearch] = useState("");
   const [reconciliationFilter, setReconciliationFilter] = useState("attention");
   const excelInput = useRef<HTMLInputElement>(null);
@@ -1245,6 +1263,7 @@ export default function HomePage() {
         f2Event,
         f2OrderNumber,
         f2OrderDate,
+        documentHeaderLocation,
       );
       downloadBlob(
         blob,
@@ -1566,6 +1585,7 @@ export default function HomePage() {
                   <label className="field"><span>Сотрудник</span><select value={documentEmployeeId} onChange={(e) => setDocumentEmployeeId(e.target.value)}><option value="">Выберите сотрудника</option>{employees.slice().sort((a,b)=>a.fullName.localeCompare(b.fullName,"ru")).map((employee)=><option value={employee.id} key={employee.id}>{employee.fullName}</option>)}</select></label>
                   <div className="segmented"><button className={documentType === "form10" ? "active" : ""} onClick={() => setDocumentType("form10")}>Форма № 10</button><button className={documentType === "f2" ? "active" : ""} onClick={() => setDocumentType("f2")}>Справка Ф-2</button><button className={documentType === "messageSheet" ? "active" : ""} onClick={() => setDocumentType("messageSheet")}>Листок сообщений</button></div>
                   {documentType === "f2" ? <div className="f2-options">
+                    <label className="field"><span>Шапка документа</span><select value={documentHeaderLocation} onChange={(event) => setDocumentHeaderLocation(event.target.value as DocumentHeaderLocation)}><option value="moscow">Москва</option><option value="sochi">Сочи</option></select></label>
                     <fieldset className="event-checklist"><legend>Отметка в справке</legend>
                       <label><input type="radio" name="f2-event" checked={f2Event==="hire"} onChange={()=>setF2Event("hire")}/><span>Принят (поступил) на работу</span></label>
                       <label><input type="radio" name="f2-event" checked={f2Event==="dismissal"} onChange={()=>setF2Event("dismissal")}/><span>Уволен с работы (отчислен из образовательной организации)</span></label>

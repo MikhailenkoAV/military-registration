@@ -1191,7 +1191,8 @@ select:focus-visible {
   margin-top: 8px;
 }
 
-.family-row input {
+.family-row input,
+.family-row select {
   width: 100%;
   height: 40px;
   min-width: 0;
@@ -1204,7 +1205,8 @@ select:focus-visible {
   font-size: 13px;
 }
 
-.family-row input:focus {
+.family-row input:focus,
+.family-row select:focus {
   border-color: var(--teal);
   outline: 0;
   box-shadow: 0 0 0 3px rgba(15, 143, 157, 0.12);
