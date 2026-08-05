@@ -90,6 +90,7 @@ type Employee = {
   vus: string;
   reserveCategory: string;
   fitnessCategory: string;
+  healthStatus: string;
   militaryCommissariat: string;
   militaryCommissariatAddress: string;
   accountType: "general" | "special" | "";
@@ -385,6 +386,7 @@ function emptyEmployee(settings: OrganizationSettings): Employee {
     vus: "",
     reserveCategory: "",
     fitnessCategory: "",
+    healthStatus: "",
     militaryCommissariat: settings.defaultCommissariat,
     militaryCommissariatAddress: settings.defaultCommissariatAddress,
     accountType: "",
@@ -639,6 +641,7 @@ function documentValues(
     SPECIAL_ACCOUNT_NUMBER: "",
     VUS: employee.vus,
     FITNESS_CATEGORY: employee.fitnessCategory,
+    HEALTH_STATUS: employee.healthStatus,
     MILITARY_DOCUMENT: militaryDocument,
     ORDER_DETAILS: `${formatDate(employee.orderDate, "")}${employee.orderNumber ? ` № ${employee.orderNumber}` : ""}`,
     POSITION: employee.position,
@@ -1057,6 +1060,7 @@ export default function HomePage() {
       profile: cleanCell(rowValue(row, "профиль")),
       reserveCategory: cleanCell(rowValue(row, "запас")),
       fitnessCategory: cleanCell(rowValue(row, "категория годности")),
+      healthStatus: cleanCell(rowValue(row, "состояние здоровья", "здоровье")),
       militaryCommissariat: cleanCell(rowValue(row, "военный комиссариат")),
       militaryCommissariatAddress: cleanCell(rowValue(row, "адрес вк")),
       inn: cleanCell(rowValue(row, "инн")),
@@ -1704,6 +1708,7 @@ export default function HomePage() {
                 <Field required label="ВУС" value={employeeModal.vus} help="Хранится как текст, чтобы не потерять начальные нули." onChange={(value)=>setEmployeeModal({...employeeModal,vus:value})}/>
                 <label className="field"><span>Категория запаса *</span><select required value={employeeModal.reserveCategory} onChange={(event)=>setEmployeeModal({...employeeModal,reserveCategory:event.target.value})}><option value="">Не указано</option><option value="1">1</option><option value="2">2</option><option value="3">3</option></select></label>
                 <Field required label="Категория годности" value={employeeModal.fitnessCategory} onChange={(value)=>setEmployeeModal({...employeeModal,fitnessCategory:value})}/>
+                <Field label="Состояние здоровья" value={employeeModal.healthStatus ?? ""} onChange={(value)=>setEmployeeModal({...employeeModal,healthStatus:value})}/>
                 <Field required label="Военный комиссариат" value={employeeModal.militaryCommissariat} onChange={(value)=>setEmployeeModal({...employeeModal,militaryCommissariat:value})}/>
                 <Field label="Адрес военного комиссариата" value={employeeModal.militaryCommissariatAddress} onChange={(value)=>setEmployeeModal({...employeeModal,militaryCommissariatAddress:value})}/>
                 <Field type="date" label="Сверка с документами сотрудника" value={employeeModal.lastEmployeeVerification} onChange={(value)=>setEmployeeModal({...employeeModal,lastEmployeeVerification:value})}/>
