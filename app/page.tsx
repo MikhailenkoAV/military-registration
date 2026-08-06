@@ -125,6 +125,32 @@ type DocumentRecord = {
   type: DocumentType;
   createdAt: string;
   title: string;
+  status?: "formed" | "signed" | "sent";
+  headerLocation?: DocumentHeaderLocation;
+  eventType?: "hire" | "dismissal";
+  orderNumber?: string;
+  orderDate?: string;
+  employeeIds?: string[];
+  changeEntries?: ChangeDocumentEntry[];
+  employeeCount?: number;
+  outgoingNumber?: string;
+  sentAt?: string;
+};
+
+type EmployeeFieldChange = {
+  key: keyof Employee;
+  label: string;
+  oldValue: string | boolean;
+  newValue: string | boolean;
+};
+
+type EmployeeChangeRecord = {
+  id: string;
+  employeeId: string;
+  employeeName: string;
+  createdAt: string;
+  changes: EmployeeFieldChange[];
+  undoneAt?: string;
 };
 
 type OrganizationSettings = {
@@ -145,6 +171,7 @@ type StoredState = {
   employees: Employee[];
   notices: Notice[];
   documents: DocumentRecord[];
+  employeeChanges: EmployeeChangeRecord[];
   settings: OrganizationSettings;
 };
 
@@ -316,6 +343,31 @@ const requiredFields: { key: keyof Employee; label: string }[] = [
   { key: "reserveCategory", label: "категория запаса" },
   { key: "fitnessCategory", label: "категория годности" },
   { key: "militaryCommissariat", label: "военный комиссариат" },
+];
+
+const employeeHistoryFields: { key: keyof Employee; label: string }[] = [
+  { key: "fullName", label: "Ф.И.О." }, { key: "sex", label: "пол" },
+  { key: "active", label: "статус" }, { key: "department", label: "подразделение" },
+  { key: "position", label: "должность" }, { key: "hireDate", label: "дата приёма" },
+  { key: "dismissalDate", label: "дата увольнения" }, { key: "orderNumber", label: "номер приказа" },
+  { key: "orderDate", label: "дата приказа" }, { key: "birthDate", label: "дата рождения" },
+  { key: "birthPlace", label: "место рождения" }, { key: "passportSeries", label: "серия паспорта" },
+  { key: "passportNumber", label: "номер паспорта" }, { key: "passportIssueDate", label: "дата выдачи паспорта" },
+  { key: "passportIssuedBy", label: "кем выдан паспорт" }, { key: "registrationAddress", label: "адрес регистрации" },
+  { key: "registrationDate", label: "дата регистрации" }, { key: "actualAddress", label: "фактический адрес" },
+  { key: "phone", label: "телефон" }, { key: "snils", label: "СНИЛС" }, { key: "inn", label: "ИНН" },
+  { key: "education", label: "образование" }, { key: "profession", label: "профессия" },
+  { key: "languages", label: "иностранные языки" }, { key: "driverLicense", label: "водительское удостоверение" },
+  { key: "maritalStatus", label: "семейное положение" }, { key: "familyMembers", label: "состав семьи" },
+  { key: "militaryDocType", label: "вид документа воинского учёта" }, { key: "militaryDocNumber", label: "номер документа воинского учёта" },
+  { key: "militaryDocIssueDate", label: "дата выдачи документа воинского учёта" }, { key: "militaryDocIssuedBy", label: "кем выдан документ воинского учёта" },
+  { key: "militaryRank", label: "воинское звание" }, { key: "composition", label: "состав" },
+  { key: "profile", label: "профиль" }, { key: "vus", label: "ВУС" },
+  { key: "reserveCategory", label: "категория запаса" }, { key: "fitnessCategory", label: "категория годности" },
+  { key: "healthStatus", label: "состояние здоровья" }, { key: "militaryCommissariat", label: "военный комиссариат" },
+  { key: "militaryCommissariatAddress", label: "адрес военного комиссариата" },
+  { key: "lastEmployeeVerification", label: "сверка с документами сотрудника" },
+  { key: "lastCommissariatVerification", label: "сверка с военкоматом" }, { key: "notes", label: "дополнительные сведения" },
 ];
 
 const enlistedRankOrder = [
@@ -576,6 +628,16 @@ function getMissingFields(employee: Employee) {
 function cardCompleteness(employee: Employee) {
   const completed = requiredFields.length - getMissingFields(employee).length;
   return Math.round((completed / requiredFields.length) * 100);
+}
+
+function displayChangeValue(change: EmployeeFieldChange, value: string | boolean) {
+  if (change.key === "active") return value ? "Работает" : "Уволен";
+  if (change.key === "sex") return value === "male" ? "Мужской" : "Женский";
+  if (change.key === "familyMembers" && typeof value === "string") {
+    const members = familyRows(value);
+    return members.length ? members.map((member) => [member.relation, member.fullName, formatDate(member.birthDate, "")].filter(Boolean).join(" — ")).join("; ") : "не указано";
+  }
+  return String(value || "не указано");
 }
 
 type DocumentCheck = { critical: string[]; warnings: string[] };
@@ -1041,6 +1103,7 @@ export default function HomePage() {
   const [employees, setEmployees] = useState<Employee[]>([]);
   const [notices, setNotices] = useState<Notice[]>([]);
   const [documents, setDocuments] = useState<DocumentRecord[]>([]);
+  const [employeeChanges, setEmployeeChanges] = useState<EmployeeChangeRecord[]>([]);
   const [organization, setOrganization] = useState<OrganizationSettings>(emptySettings);
   const [employeeModal, setEmployeeModal] = useState<Employee | null>(null);
   const [eventModal, setEventModal] = useState(false);
@@ -1067,6 +1130,9 @@ export default function HomePage() {
   const [lastBackupAt, setLastBackupAt] = useState("");
   const [changeEmployeeToAdd, setChangeEmployeeToAdd] = useState("");
   const [changeDocumentEntries, setChangeDocumentEntries] = useState<ChangeDocumentEntry[]>([]);
+  const [documentHistoryType, setDocumentHistoryType] = useState<DocumentType | "">("");
+  const [documentHistoryEmployee, setDocumentHistoryEmployee] = useState("");
+  const [documentHistoryStatus, setDocumentHistoryStatus] = useState("");
   const [reconciliationSearch, setReconciliationSearch] = useState("");
   const [reconciliationFilter, setReconciliationFilter] = useState("attention");
   const excelInput = useRef<HTMLInputElement>(null);
@@ -1091,6 +1157,7 @@ export default function HomePage() {
         setEmployees(Array.isArray(stored.employees) ? stored.employees : []);
         setNotices(Array.isArray(stored.notices) ? stored.notices : []);
         setDocuments(Array.isArray(stored.documents) ? stored.documents : []);
+        setEmployeeChanges(Array.isArray(stored.employeeChanges) ? stored.employeeChanges : []);
         setOrganization({ ...emptySettings, ...(stored.settings ?? {}) });
       }
       setLastBackupAt(localStorage.getItem(LAST_BACKUP_KEY) ?? "");
@@ -1104,9 +1171,9 @@ export default function HomePage() {
 
   useEffect(() => {
     if (!hydrated) return;
-    const state: StoredState = { employees, notices, documents, settings: organization };
+    const state: StoredState = { employees, notices, documents, employeeChanges, settings: organization };
     localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
-  }, [employees, notices, documents, organization, hydrated]);
+  }, [employees, notices, documents, employeeChanges, organization, hydrated]);
 
   useEffect(() => {
     if (!toast) return;
@@ -1156,6 +1223,12 @@ export default function HomePage() {
     : documentType === "changes"
       ? documentSettingsMissing.length > 0
       : selectedDocumentCheck.critical.length > 0 || documentSettingsMissing.length > 0 || documentParameterMissing.length > 0;
+  const filteredDocumentHistory = documents.filter((record) => {
+    if (documentHistoryType && record.type !== documentHistoryType) return false;
+    if (documentHistoryStatus && (record.status ?? "formed") !== documentHistoryStatus) return false;
+    if (documentHistoryEmployee && record.employeeId !== documentHistoryEmployee && !record.employeeIds?.includes(documentHistoryEmployee)) return false;
+    return true;
+  });
 
   const backupAgeDays = lastBackupAt
     ? Math.floor((Date.now() - new Date(lastBackupAt).getTime()) / 86_400_000)
@@ -1274,12 +1347,29 @@ export default function HomePage() {
     const parts = splitName(employeeModal.fullName);
     const saved = { ...employeeModal, ...parts };
     const previous = employees.find((employee) => employee.id === saved.id);
+    const fieldChanges: EmployeeFieldChange[] = previous ? employeeHistoryFields
+      .filter(({ key }) => previous[key] !== saved[key])
+      .map(({ key, label }) => ({
+        key,
+        label,
+        oldValue: previous[key] as string | boolean,
+        newValue: saved[key] as string | boolean,
+      })) : [];
     setEmployees((current) => {
       const exists = current.some((employee) => employee.id === saved.id);
       return exists
         ? current.map((employee) => (employee.id === saved.id ? saved : employee))
         : [saved, ...current];
     });
+    if (fieldChanges.length) {
+      setEmployeeChanges((current) => [{
+        id: makeId(),
+        employeeId: saved.id,
+        employeeName: saved.fullName,
+        createdAt: new Date().toISOString(),
+        changes: fieldChanges,
+      }, ...current]);
+    }
     setEmployeeModal(null);
     const trackedChanges: { key: keyof Employee; label: string }[] = [
       { key: "maritalStatus", label: "семейное положение" },
@@ -1290,9 +1380,7 @@ export default function HomePage() {
       { key: "actualAddress", label: "фактический адрес" },
       { key: "healthStatus", label: "состояние здоровья" },
     ];
-    const changedLabels = previous
-      ? trackedChanges.filter(({ key }) => previous[key] !== saved[key]).map(({ label }) => label)
-      : [];
+    const changedLabels = trackedChanges.filter(({ key }) => fieldChanges.some((change) => change.key === key)).map(({ label }) => label);
     const suggestedRule = !previous
       ? "hire"
       : previous.active && !saved.active
@@ -1323,11 +1411,55 @@ export default function HomePage() {
     setToast("Карточка сотрудника сохранена.");
   }
 
+  function undoEmployeeChange(record: EmployeeChangeRecord) {
+    const latest = employeeChanges.find((item) => item.employeeId === record.employeeId && !item.undoneAt);
+    if (!latest || latest.id !== record.id) {
+      setToast("Отменить можно только последнее активное изменение карточки.");
+      return;
+    }
+    if (!window.confirm(`Отменить последнее изменение карточки «${record.employeeName}»?`)) return;
+    setEmployees((current) => current.map((employee) => {
+      if (employee.id !== record.employeeId) return employee;
+      const restored = { ...employee } as Employee;
+      const writable = restored as unknown as Record<string, string | boolean>;
+      record.changes.forEach((change) => { writable[change.key] = change.oldValue; });
+      if (record.changes.some((change) => change.key === "fullName")) Object.assign(restored, splitName(restored.fullName));
+      return restored;
+    }));
+    setEmployeeChanges((current) => current.map((item) => item.id === record.id ? { ...item, undoneAt: new Date().toISOString() } : item));
+    setEmployeeModal((current) => {
+      if (!current || current.id !== record.employeeId) return current;
+      const restored = { ...current } as Employee;
+      const writable = restored as unknown as Record<string, string | boolean>;
+      record.changes.forEach((change) => { writable[change.key] = change.oldValue; });
+      if (record.changes.some((change) => change.key === "fullName")) Object.assign(restored, splitName(restored.fullName));
+      return restored;
+    });
+    setToast("Последнее изменение отменено.");
+  }
+
+  function prepareChangeDocument(record: EmployeeChangeRecord) {
+    const employee = employees.find((item) => item.id === record.employeeId);
+    if (!employee) {
+      setToast("Карточка сотрудника не найдена.");
+      return;
+    }
+    const content = record.changes.map((change) => `${change.label}: «${displayChangeValue(change, change.oldValue)}» → «${displayChangeValue(change, change.newValue)}»`).join("; ");
+    setChangeDocumentEntries([{ employeeId: record.employeeId, content }]);
+    setDocumentType("changes");
+    setDocumentEmployeeId(record.employeeId);
+    setEmployeeModal(null);
+    setView("documents");
+    window.scrollTo({ top: 0, behavior: "smooth" });
+    setToast("Изменения перенесены в документ. Проверьте формулировку перед выгрузкой.");
+  }
+
   function deleteEmployee(employee: Employee) {
     if (!window.confirm(`Удалить карточку «${employee.fullName}» и связанные задачи?`)) return;
     setEmployees((current) => current.filter((item) => item.id !== employee.id));
     setNotices((current) => current.filter((notice) => notice.employeeId !== employee.id));
     setDocuments((current) => current.filter((document) => document.employeeId !== employee.id));
+    setEmployeeChanges((current) => current.filter((record) => record.employeeId !== employee.id));
     setEmployeeModal(null);
     setToast("Карточка удалена.");
   }
@@ -1433,6 +1565,7 @@ export default function HomePage() {
       setEmployees(importPreview.employees);
       setNotices([]);
       setDocuments([]);
+      setEmployeeChanges([]);
     } else {
       setEmployees((current) => {
         const next = [...current];
@@ -1499,6 +1632,7 @@ export default function HomePage() {
       outgoingNumber: "",
     };
     setNotices((current) => [notice, ...current]);
+    const eventEmployee = employees.find((employee) => employee.id === eventDraft.employeeId);
     if (eventDraft.ruleId === "hire") {
       setEmployees((current) =>
         current.map((employee) =>
@@ -1507,6 +1641,12 @@ export default function HomePage() {
             : employee,
         ),
       );
+      if (eventEmployee) {
+        const changes: EmployeeFieldChange[] = [];
+        if (!eventEmployee.active) changes.push({ key: "active", label: "статус", oldValue: false, newValue: true });
+        if (eventEmployee.hireDate !== eventDraft.eventDate) changes.push({ key: "hireDate", label: "дата приёма", oldValue: eventEmployee.hireDate, newValue: eventDraft.eventDate });
+        if (changes.length) setEmployeeChanges((current) => [{ id: makeId(), employeeId: eventEmployee.id, employeeName: eventEmployee.fullName, createdAt: new Date().toISOString(), changes }, ...current]);
+      }
     }
     if (eventDraft.ruleId === "dismissal") {
       setEmployees((current) =>
@@ -1516,6 +1656,12 @@ export default function HomePage() {
             : employee,
         ),
       );
+      if (eventEmployee) {
+        const changes: EmployeeFieldChange[] = [];
+        if (eventEmployee.active) changes.push({ key: "active", label: "статус", oldValue: true, newValue: false });
+        if (eventEmployee.dismissalDate !== eventDraft.eventDate) changes.push({ key: "dismissalDate", label: "дата увольнения", oldValue: eventEmployee.dismissalDate, newValue: eventDraft.eventDate });
+        if (changes.length) setEmployeeChanges((current) => [{ id: makeId(), employeeId: eventEmployee.id, employeeName: eventEmployee.fullName, createdAt: new Date().toISOString(), changes }, ...current]);
+      }
     }
     setEventModal(false);
     setToast("Задача создана, срок рассчитан.");
@@ -1542,13 +1688,23 @@ export default function HomePage() {
     );
   }
 
-  function recordDocument(employee: Employee, type: DocumentType) {
+  function recordDocument(employee: Employee, type: DocumentType, employeeIds = [employee.id], entries?: ChangeDocumentEntry[]) {
     setDocuments((current) => [
       {
         id: makeId(),
         employeeId: employee.id,
         type,
         createdAt: new Date().toISOString(),
+        status: "formed",
+        headerLocation: (["f2", "employmentNotice", "changes", "officerList", "enlistedList"] as DocumentType[]).includes(type) ? documentHeaderLocation : undefined,
+        eventType: type === "f2" || type === "employmentNotice" ? f2Event : undefined,
+        orderNumber: type === "f2" || type === "employmentNotice" ? f2OrderNumber : undefined,
+        orderDate: type === "f2" || type === "employmentNotice" ? f2OrderDate : undefined,
+        employeeIds,
+        employeeCount: employeeIds.length,
+        changeEntries: entries?.map((entry) => ({ ...entry })),
+        outgoingNumber: "",
+        sentAt: "",
         title: type === "form10"
           ? "Форма № 10"
           : type === "f2"
@@ -1565,6 +1721,36 @@ export default function HomePage() {
       },
       ...current,
     ]);
+  }
+
+  function setDocumentRecordStatus(record: DocumentRecord, status: "formed" | "signed" | "sent") {
+    if (status === "sent") {
+      const outgoingNumber = window.prompt("Исходящий номер:", record.outgoingNumber ?? "");
+      if (outgoingNumber === null) return;
+      const sentAt = window.prompt("Дата отправки (ГГГГ-ММ-ДД):", record.sentAt || todayIso());
+      if (!sentAt) return;
+      setDocuments((current) => current.map((item) => item.id === record.id ? { ...item, status, outgoingNumber, sentAt } : item));
+      setToast("Документ отмечен отправленным.");
+      return;
+    }
+    setDocuments((current) => current.map((item) => item.id === record.id ? { ...item, status } : item));
+    setToast(status === "signed" ? "Документ отмечен подписанным." : "Статус возвращён: сформирован.");
+  }
+
+  function repeatDocument(record: DocumentRecord) {
+    setDocumentType(record.type);
+    setDocumentHeaderLocation(record.headerLocation ?? "moscow");
+    setF2Event(record.eventType ?? "hire");
+    setF2OrderNumber(record.orderNumber ?? "");
+    setF2OrderDate(record.orderDate ?? "");
+    if (record.type === "changes") {
+      setChangeDocumentEntries((record.changeEntries ?? []).filter((entry) => employees.some((employee) => employee.id === entry.employeeId)));
+    } else if (record.type !== "officerList" && record.type !== "enlistedList") {
+      setDocumentEmployeeId(record.employeeId);
+    }
+    setView("documents");
+    window.scrollTo({ top: 0, behavior: "smooth" });
+    setToast("Параметры документа восстановлены. Проверьте данные и скачайте Word.");
   }
 
   async function downloadWord() {
@@ -1587,7 +1773,7 @@ export default function HomePage() {
         );
         downloadBlob(blob, documentType === "officerList" ? "Список_офицеры.docx" : "Список_рядовые.docx");
         const firstEmployee = employees.find((item) => item.id === automaticListEntries[0].employeeId);
-        if (firstEmployee) recordDocument(firstEmployee, documentType);
+        if (firstEmployee) recordDocument(firstEmployee, documentType, automaticListEntries.map((entry) => entry.employeeId));
         setToast("Редактируемый Word подготовлен.");
       } catch {
         setToast("Не удалось сформировать Word. Проверьте шаблон и повторите попытку.");
@@ -1609,7 +1795,7 @@ export default function HomePage() {
         const blob = await buildChangesDocx(changeDocumentEntries, employees, organization, documentHeaderLocation);
         downloadBlob(blob, "Сведения_об_изменениях.docx");
         const firstEmployee = employees.find((item) => item.id === changeDocumentEntries[0].employeeId);
-        if (firstEmployee) recordDocument(firstEmployee, documentType);
+        if (firstEmployee) recordDocument(firstEmployee, documentType, changeDocumentEntries.map((entry) => entry.employeeId), changeDocumentEntries);
         setToast("Редактируемый Word подготовлен.");
       } catch {
         setToast("Не удалось сформировать Word. Проверьте шаблон и повторите попытку.");
@@ -1655,6 +1841,8 @@ export default function HomePage() {
         : employee.lastCommissariatVerification || todayIso(),
     );
     if (!date) return;
+    const key: keyof Employee = type === "employee" ? "lastEmployeeVerification" : "lastCommissariatVerification";
+    const oldValue = employee[key] as string;
     setEmployees((current) =>
       current.map((item) =>
         item.id === employee.id
@@ -1666,11 +1854,15 @@ export default function HomePage() {
           : item,
       ),
     );
+    if (oldValue !== date) setEmployeeChanges((current) => [{
+      id: makeId(), employeeId: employee.id, employeeName: employee.fullName, createdAt: new Date().toISOString(),
+      changes: [{ key, label: type === "employee" ? "сверка с документами сотрудника" : "сверка с военкоматом", oldValue, newValue: date }],
+    }, ...current]);
     setToast("Дата сверки сохранена. Следующий срок рассчитан на год вперёд.");
   }
 
   function exportBackup() {
-    const state: StoredState = { employees, notices, documents, settings: organization };
+    const state: StoredState = { employees, notices, documents, employeeChanges, settings: organization };
     const blob = new Blob([JSON.stringify(state, null, 2)], { type: "application/json" });
     const link = window.document.createElement("a");
     link.href = URL.createObjectURL(blob);
@@ -1694,6 +1886,7 @@ export default function HomePage() {
       setEmployees(data.employees);
       setNotices(data.notices);
       setDocuments(Array.isArray(data.documents) ? data.documents : []);
+      setEmployeeChanges(Array.isArray(data.employeeChanges) ? data.employeeChanges : []);
       setOrganization({ ...emptySettings, ...(data.settings ?? {}) });
       const restoredAt = new Date().toISOString();
       localStorage.setItem(LAST_BACKUP_KEY, restoredAt);
@@ -1710,6 +1903,7 @@ export default function HomePage() {
     setEmployees([]);
     setNotices([]);
     setDocuments([]);
+    setEmployeeChanges([]);
     setOrganization(emptySettings);
     localStorage.removeItem(STORAGE_KEY);
     localStorage.removeItem(LAST_BACKUP_KEY);
@@ -2028,7 +2222,34 @@ export default function HomePage() {
                   <p>{documentType === "form10" ? "Две страницы A4: лицевая и оборотная стороны." : documentType === "f2" || documentType === "employmentNotice" ? "Одна страница A4: сведения о принятии или увольнении." : documentType === "officerList" || documentType === "enlistedList" ? "Список автоматически сформирован по воинским званиям действующих сотрудников." : documentType === "changes" ? "Групповой документ: одна строка на каждого выбранного сотрудника." : "Одна страница A4 с корешком по представленному образцу."}</p>
                 </section>
               </div>
-              {documents.length ? <section className="history-section"><h3>Последние сформированные документы</h3><div className="data-panel history-list">{documents.slice(0,8).map((document) => <div key={document.id}><FileText size={17}/><span><strong>{document.title}</strong><small>{employees.find((employee)=>employee.id===document.employeeId)?.fullName ?? "Карточка удалена"}</small></span><time>{new Intl.DateTimeFormat("ru-RU",{dateStyle:"short",timeStyle:"short"}).format(new Date(document.createdAt))}</time></div>)}</div></section> : null}
+              {documents.length ? <section className="history-section">
+                <div className="section-heading compact"><div><h3>История документов</h3><p>Контроль формирования, подписания и отправки.</p></div></div>
+                <div className="filter-panel document-history-filters">
+                  <label><span>Документ</span><select value={documentHistoryType} onChange={(event)=>setDocumentHistoryType(event.target.value as DocumentType | "")}><option value="">Все документы</option><option value="form10">Форма № 10</option><option value="f2">Справка Ф-2</option><option value="messageSheet">Листок сообщений</option><option value="changes">Изменение данных</option><option value="employmentNotice">Принятие / увольнение</option><option value="officerList">Список: офицеры</option><option value="enlistedList">Список: рядовые</option></select></label>
+                  <label><span>Сотрудник</span><select value={documentHistoryEmployee} onChange={(event)=>setDocumentHistoryEmployee(event.target.value)}><option value="">Все сотрудники</option>{employees.slice().sort((a,b)=>a.fullName.localeCompare(b.fullName,"ru")).map((employee)=><option value={employee.id} key={employee.id}>{employee.fullName}</option>)}</select></label>
+                  <label><span>Статус</span><select value={documentHistoryStatus} onChange={(event)=>setDocumentHistoryStatus(event.target.value)}><option value="">Все статусы</option><option value="formed">Сформирован</option><option value="signed">Подписан</option><option value="sent">Отправлен</option></select></label>
+                </div>
+                {filteredDocumentHistory.length ? <div className="document-history-list">{filteredDocumentHistory.map((record) => {
+                  const status = record.status ?? "formed";
+                  const person = employees.find((employee)=>employee.id===record.employeeId);
+                  return <article className="data-panel document-history-card" key={record.id}>
+                    <div className="document-history-main"><FileText size={20}/><span><strong>{record.title}</strong><small>{record.employeeCount && record.employeeCount > 1 ? `${record.employeeCount} сотрудник(а)` : person?.fullName ?? "Карточка удалена"}</small></span></div>
+                    <div className="document-history-meta">
+                      <span><b>Создан:</b> {new Intl.DateTimeFormat("ru-RU",{dateStyle:"short",timeStyle:"short"}).format(new Date(record.createdAt))}</span>
+                      {record.headerLocation ? <span><b>Шапка:</b> {record.headerLocation === "moscow" ? "Москва" : "Сочи"}</span> : null}
+                      {record.eventType ? <span><b>Событие:</b> {record.eventType === "hire" ? "Приём" : "Увольнение"}</span> : null}
+                      {record.orderNumber || record.orderDate ? <span><b>Приказ:</b> № {record.orderNumber || "—"} от {formatDate(record.orderDate ?? "", "—")}</span> : null}
+                      {status === "sent" ? <span><b>Отправлен:</b> {formatDate(record.sentAt ?? "", "—")} · исх. № {record.outgoingNumber || "—"}</span> : null}
+                    </div>
+                    <div className="document-history-actions">
+                      <span className={`document-status ${status}`}>{status === "formed" ? "Сформирован" : status === "signed" ? "Подписан" : "Отправлен"}</span>
+                      <button className="button ghost small" onClick={()=>repeatDocument(record)}><RotateCcw size={15}/> Повторить</button>
+                      {status === "formed" ? <button className="button secondary small" onClick={()=>setDocumentRecordStatus(record,"signed")}><Check size={15}/> Подписан</button> : status === "signed" ? <button className="button ghost small" onClick={()=>setDocumentRecordStatus(record,"formed")}><RotateCcw size={15}/> Вернуть к сформирован</button> : <button className="button ghost small" onClick={()=>setDocumentRecordStatus(record,"signed")}><RotateCcw size={15}/> Вернуть к подписан</button>}
+                      {status !== "sent" ? <button className="button primary small" onClick={()=>setDocumentRecordStatus(record,"sent")}><FileDown size={15}/> Отправлен</button> : null}
+                    </div>
+                  </article>;
+                })}</div> : <div className="empty-state compact-empty"><FileText size={30}/><h3>Документы не найдены</h3><p>Измените фильтры истории.</p></div>}
+              </section> : null}
             </>
           ) : null}
 
@@ -2149,6 +2370,12 @@ export default function HomePage() {
                 <Field type="date" label="Сверка с военкоматом" value={employeeModal.lastCommissariatVerification} onChange={(value)=>setEmployeeModal({...employeeModal,lastCommissariatVerification:value})}/>
                 <Field label="Дополнительные сведения" value={employeeModal.notes} onChange={(value)=>setEmployeeModal({...employeeModal,notes:value})}/>
               </div></fieldset>
+              {employees.some((employee)=>employee.id===employeeModal.id) ? <fieldset className="employee-change-history"><legend>История изменений</legend>
+                {employeeChanges.filter((record)=>record.employeeId===employeeModal.id).length ? <div className="employee-change-list">{employeeChanges.filter((record)=>record.employeeId===employeeModal.id).slice(0,10).map((record) => <article className={record.undoneAt ? "undone" : ""} key={record.id}>
+                  <div className="employee-change-heading"><span><strong>{new Intl.DateTimeFormat("ru-RU",{dateStyle:"short",timeStyle:"short"}).format(new Date(record.createdAt))}</strong>{record.undoneAt ? <small>Изменение отменено</small> : <small>Изменено полей: {record.changes.length}</small>}</span><div><button type="button" className="button ghost small" disabled={Boolean(record.undoneAt)} onClick={()=>prepareChangeDocument(record)}><FileText size={14}/> В документ</button>{employeeChanges.find((item)=>item.employeeId===employeeModal.id&&!item.undoneAt)?.id === record.id ? <button type="button" className="button danger-outline small" onClick={()=>undoEmployeeChange(record)}><RotateCcw size={14}/> Отменить</button> : null}</div></div>
+                  <div className="employee-change-fields">{record.changes.map((change)=><div key={String(change.key)}><strong>{change.label}</strong><span className="old-value">{displayChangeValue(change,change.oldValue)}</span><ChevronRight size={14}/><span className="new-value">{displayChangeValue(change,change.newValue)}</span></div>)}</div>
+                </article>)}</div> : <p className="empty-history">Изменения этой карточки ещё не зафиксированы.</p>}
+              </fieldset> : null}
             </div>
             <div className="modal-footer">{employees.some((employee)=>employee.id===employeeModal.id) ? <button type="button" className="button danger-outline" onClick={()=>deleteEmployee(employeeModal)}><Trash2 size={16}/> Удалить</button> : <span/>}<div><button type="button" className="button secondary" onClick={()=>setEmployeeModal(null)}>Отмена</button><button className="button primary" type="submit"><Check size={16}/> Сохранить</button></div></div>
           </form>
