@@ -161,6 +161,7 @@ type Rule = {
 };
 
 const STORAGE_KEY = "voinskiy-uchet-v1";
+const LAST_BACKUP_KEY = "voinskiy-uchet-last-backup";
 
 const RULES: Rule[] = [
   {
@@ -559,6 +560,11 @@ function statusLabel(status: string, dueDate = "") {
 
 function getMissingFields(employee: Employee) {
   return requiredFields.filter(({ key }) => !String(employee[key] ?? "").trim()).map(({ label }) => label);
+}
+
+function cardCompleteness(employee: Employee) {
+  const completed = requiredFields.length - getMissingFields(employee).length;
+  return Math.round((completed / requiredFields.length) * 100);
 }
 
 function uniqueValues(employees: Employee[], key: keyof Employee) {
@@ -1013,6 +1019,7 @@ export default function HomePage() {
   const [f2OrderNumber, setF2OrderNumber] = useState("");
   const [f2OrderDate, setF2OrderDate] = useState("");
   const [documentHeaderLocation, setDocumentHeaderLocation] = useState<DocumentHeaderLocation>("moscow");
+  const [lastBackupAt, setLastBackupAt] = useState("");
   const [changeEmployeeToAdd, setChangeEmployeeToAdd] = useState("");
   const [changeDocumentEntries, setChangeDocumentEntries] = useState<ChangeDocumentEntry[]>([]);
   const [reconciliationSearch, setReconciliationSearch] = useState("");
@@ -1041,6 +1048,7 @@ export default function HomePage() {
         setDocuments(Array.isArray(stored.documents) ? stored.documents : []);
         setOrganization({ ...emptySettings, ...(stored.settings ?? {}) });
       }
+      setLastBackupAt(localStorage.getItem(LAST_BACKUP_KEY) ?? "");
     } catch {
       setToast("Не удалось прочитать сохранённые данные. Можно восстановить резервную копию.");
     } finally {
@@ -1074,6 +1082,11 @@ export default function HomePage() {
     () => employees.filter((employee) => employee.active && militaryRankGroup(employee.militaryRank) === "unknown"),
     [employees],
   );
+
+  const backupAgeDays = lastBackupAt
+    ? Math.floor((Date.now() - new Date(lastBackupAt).getTime()) / 86_400_000)
+    : null;
+  const backupIsDue = employees.length > 0 && (backupAgeDays === null || backupAgeDays >= 7);
 
   const pendingNotices = useMemo(
     () => notices.filter((notice) => !notice.completedAt),
@@ -1186,6 +1199,7 @@ export default function HomePage() {
     }
     const parts = splitName(employeeModal.fullName);
     const saved = { ...employeeModal, ...parts };
+    const previous = employees.find((employee) => employee.id === saved.id);
     setEmployees((current) => {
       const exists = current.some((employee) => employee.id === saved.id);
       return exists
@@ -1193,6 +1207,45 @@ export default function HomePage() {
         : [saved, ...current];
     });
     setEmployeeModal(null);
+    const trackedChanges: { key: keyof Employee; label: string }[] = [
+      { key: "maritalStatus", label: "семейное положение" },
+      { key: "education", label: "образование" },
+      { key: "department", label: "подразделение" },
+      { key: "position", label: "должность" },
+      { key: "registrationAddress", label: "адрес регистрации" },
+      { key: "actualAddress", label: "фактический адрес" },
+      { key: "healthStatus", label: "состояние здоровья" },
+    ];
+    const changedLabels = previous
+      ? trackedChanges.filter(({ key }) => previous[key] !== saved[key]).map(({ label }) => label)
+      : [];
+    const suggestedRule = !previous
+      ? "hire"
+      : previous.active && !saved.active
+        ? "dismissal"
+        : changedLabels.length
+          ? "change"
+          : "";
+    if (suggestedRule) {
+      const rule = RULES.find((item) => item.id === suggestedRule) ?? RULES[0];
+      const eventDate = suggestedRule === "hire"
+        ? saved.hireDate || todayIso()
+        : suggestedRule === "dismissal"
+          ? saved.dismissalDate || todayIso()
+          : todayIso();
+      const reason = suggestedRule === "change" ? ` Изменено: ${changedLabels.join(", ")}.` : "";
+      if (window.confirm(`Карточка сохранена.${reason}\n\nСоздать задачу «${rule.title}»?`)) {
+        setEventDraft({
+          employeeId: saved.id,
+          ruleId: suggestedRule,
+          eventDate,
+          dueDate: dueForRule(rule, eventDate, organization),
+          note: suggestedRule === "change" ? `Изменено: ${changedLabels.join(", ")}` : "",
+        });
+        setEventModal(true);
+        return;
+      }
+    }
     setToast("Карточка сотрудника сохранена.");
   }
 
@@ -1301,6 +1354,7 @@ export default function HomePage() {
 
   function commitImport(mode: "merge" | "replace") {
     if (!importPreview) return;
+    if (employees.length) exportBackup();
     if (mode === "replace") {
       setEmployees(importPreview.employees);
       setNotices([]);
@@ -1547,6 +1601,9 @@ export default function HomePage() {
     link.download = `voinskiy-uchet-backup-${todayIso()}.json`;
     link.click();
     URL.revokeObjectURL(link.href);
+    const createdAt = new Date().toISOString();
+    localStorage.setItem(LAST_BACKUP_KEY, createdAt);
+    setLastBackupAt(createdAt);
     setToast("Резервная копия создана.");
   }
 
@@ -1562,6 +1619,9 @@ export default function HomePage() {
       setNotices(data.notices);
       setDocuments(Array.isArray(data.documents) ? data.documents : []);
       setOrganization({ ...emptySettings, ...(data.settings ?? {}) });
+      const restoredAt = new Date().toISOString();
+      localStorage.setItem(LAST_BACKUP_KEY, restoredAt);
+      setLastBackupAt(restoredAt);
       setToast("Резервная копия восстановлена.");
     } catch {
       setToast("Файл не является корректной резервной копией.");
@@ -1576,6 +1636,8 @@ export default function HomePage() {
     setDocuments([]);
     setOrganization(emptySettings);
     localStorage.removeItem(STORAGE_KEY);
+    localStorage.removeItem(LAST_BACKUP_KEY);
+    setLastBackupAt("");
     setToast("Все локальные данные удалены.");
   }
 
@@ -1666,6 +1728,11 @@ export default function HomePage() {
         <div className="content">
           {view === "dashboard" ? (
             <>
+              {backupIsDue ? <section className="backup-reminder inline-warning">
+                <ArchiveRestore size={20}/>
+                <span><strong>{lastBackupAt ? "Пора обновить резервную копию" : "Резервная копия ещё не создана"}</strong>{lastBackupAt ? `Последняя копия создана ${backupAgeDays} дн. назад. Рекомендуемый интервал — не более 7 дней.` : "Создайте первый файл восстановления, чтобы не потерять локальную базу браузера."}</span>
+                <button className="button secondary small" onClick={exportBackup}><Download size={16}/> Создать копию</button>
+              </section> : null}
               <section className="kpi-grid" aria-label="Основные показатели">
                 <button className="kpi-card" onClick={() => navigate("employees")}>
                   <span className="kpi-icon teal"><Users size={25} /></span>
@@ -1773,7 +1840,7 @@ export default function HomePage() {
                         return <tr key={employee.id} onDoubleClick={() => setEmployeeModal(employee)}>
                           <td><button className="employee-link" onClick={() => setEmployeeModal(employee)}><span className="avatar"><UserRound size={17} /></span><span><strong>{employee.fullName}</strong><small>{employee.snils || "СНИЛС не указан"}</small></span></button></td>
                           <td>{employee.department || "—"}</td><td>{employee.position || "—"}</td><td>{employee.militaryRank || "—"}</td><td className="mono">{employee.vus || "—"}</td><td>{employee.fitnessCategory || "—"}</td>
-                          <td><span className={`status ${missing.length ? "missing" : "completed"}`}>{missing.length ? `Не заполнено: ${missing.length}` : "Заполнена"}</span></td>
+                          <td><span className={`status ${missing.length ? "missing" : "completed"}`}>{missing.length ? `Заполнено ${cardCompleteness(employee)}% · пропусков: ${missing.length}` : "Заполнено 100%"}</span></td>
                           <td><button className="icon-button" title="Редактировать" onClick={() => setEmployeeModal(employee)}><Pencil size={17} /></button></td>
                         </tr>;
                       })}
@@ -1933,7 +2000,7 @@ export default function HomePage() {
           <form className="modal employee-modal" onSubmit={saveEmployee}>
             <div className="modal-header"><div><span className="eyebrow">{employees.some((employee)=>employee.id===employeeModal.id) ? "Редактирование" : "Новая карточка"}</span><h2>{employeeModal.fullName || "Сотрудник"}</h2></div><button type="button" className="icon-button" onClick={()=>setEmployeeModal(null)} aria-label="Закрыть"><X size={20}/></button></div>
             <div className="modal-body">
-              {getMissingFields(employeeModal).length ? <div className="inline-warning"><AlertCircle size={18}/><span><strong>Карточка заполнена не полностью</strong>Не заполнено: {getMissingFields(employeeModal).slice(0,6).join(", ")}{getMissingFields(employeeModal).length>6 ? ` и ещё ${getMissingFields(employeeModal).length-6}` : ""}.</span></div> : <div className="inline-success"><Check size={18}/> Обязательные поля заполнены</div>}
+              {getMissingFields(employeeModal).length ? <div className="inline-warning"><AlertCircle size={18}/><span><strong>Карточка заполнена на {cardCompleteness(employeeModal)}%</strong>Не заполнено: {getMissingFields(employeeModal).slice(0,6).join(", ")}{getMissingFields(employeeModal).length>6 ? ` и ещё ${getMissingFields(employeeModal).length-6}` : ""}.</span></div> : <div className="inline-success"><Check size={18}/> Карточка заполнена на 100%</div>}
               <fieldset><legend>Основные сведения</legend><div className="form-grid three-col">
                 <Field required label="Ф.И.О." value={employeeModal.fullName} onChange={(value)=>setEmployeeModal({...employeeModal,fullName:value})}/>
                 <label className="field"><span>Пол</span><select value={employeeModal.sex} onChange={(e)=>setEmployeeModal({...employeeModal,sex:e.target.value as "male"|"female"})}><option value="male">Мужской</option><option value="female">Женский</option></select></label>

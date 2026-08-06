@@ -848,6 +848,30 @@ select:focus-visible {
   line-height: 1.45;
 }
 
+.backup-reminder {
+  margin-bottom: 18px;
+  align-items: center;
+}
+
+.backup-reminder span {
+  flex: 1;
+}
+
+.backup-reminder .button {
+  flex: 0 0 auto;
+}
+
+@media (max-width: 720px) {
+  .backup-reminder {
+    align-items: flex-start;
+    flex-wrap: wrap;
+  }
+
+  .backup-reminder .button {
+    width: 100%;
+  }
+}
+
 .notice-help {
   background: #f3f7f9;
   color: #526172;
