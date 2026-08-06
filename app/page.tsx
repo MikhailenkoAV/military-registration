@@ -317,6 +317,41 @@ const requiredFields: { key: keyof Employee; label: string }[] = [
   { key: "militaryCommissariat", label: "военный комиссариат" },
 ];
 
+const enlistedRanks = new Set([
+  "рядовой", "ефрейтор", "матрос", "старший матрос",
+  "младший сержант", "сержант", "старший сержант", "старшина",
+  "старшина 2 статьи", "старшина 1 статьи", "главный старшина", "главный корабельный старшина",
+  "прапорщик", "старший прапорщик", "мичман", "старший мичман",
+]);
+
+const officerRanks = new Set([
+  "младший лейтенант", "лейтенант", "старший лейтенант", "капитан", "капитан лейтенант",
+  "майор", "подполковник", "полковник", "капитан 3 ранга", "капитан 2 ранга", "капитан 1 ранга",
+  "генерал майор", "генерал лейтенант", "генерал полковник", "генерал армии",
+  "маршал российской федерации", "контр адмирал", "вице адмирал", "адмирал", "адмирал флота",
+]);
+
+function normalizedMilitaryRank(value: string) {
+  return value
+    .toLocaleLowerCase("ru-RU")
+    .replaceAll("ё", "е")
+    .replace(/\bгвардии\b/g, "")
+    .replace(/\bзапаса\b/g, "")
+    .replace(/\bв отставке\b/g, "")
+    .replace(/\bмедицинской службы\b/g, "")
+    .replace(/\bюстиции\b/g, "")
+    .replace(/[^а-я0-9]+/g, " ")
+    .trim()
+    .replace(/\s+/g, " ");
+}
+
+function militaryRankGroup(rank: string): "enlisted" | "officer" | "unknown" {
+  const normalized = normalizedMilitaryRank(rank);
+  if (enlistedRanks.has(normalized)) return "enlisted";
+  if (officerRanks.has(normalized)) return "officer";
+  return "unknown";
+}
+
 const federalHolidays2026 = new Set([
   "2026-01-01",
   "2026-01-02",
@@ -1026,6 +1061,20 @@ export default function HomePage() {
     return () => window.clearTimeout(timer);
   }, [toast]);
 
+  const automaticListEntries = useMemo<ChangeDocumentEntry[]>(() => {
+    if (documentType !== "officerList" && documentType !== "enlistedList") return [];
+    const targetGroup = documentType === "officerList" ? "officer" : "enlisted";
+    return employees
+      .filter((employee) => employee.active && militaryRankGroup(employee.militaryRank) === targetGroup)
+      .sort((a, b) => a.fullName.localeCompare(b.fullName, "ru"))
+      .map((employee) => ({ employeeId: employee.id, content: "" }));
+  }, [documentType, employees]);
+
+  const employeesWithUnknownRank = useMemo(
+    () => employees.filter((employee) => employee.active && militaryRankGroup(employee.militaryRank) === "unknown"),
+    [employees],
+  );
+
   const pendingNotices = useMemo(
     () => notices.filter((notice) => !notice.completedAt),
     [notices],
@@ -1392,21 +1441,21 @@ export default function HomePage() {
 
   async function downloadWord() {
     if (documentType === "officerList" || documentType === "enlistedList") {
-      if (!changeDocumentEntries.length) {
-        setToast("Добавьте хотя бы одного сотрудника.");
+      if (!automaticListEntries.length) {
+        setToast("В списке нет действующих сотрудников с подходящими воинскими званиями.");
         return;
       }
       try {
         setToast("Формируется список сотрудников…");
         const blob = await buildPersonnelListDocx(
           documentType,
-          changeDocumentEntries.map((entry) => entry.employeeId),
+          automaticListEntries.map((entry) => entry.employeeId),
           employees,
           organization,
           documentHeaderLocation,
         );
         downloadBlob(blob, documentType === "officerList" ? "Список_офицеры.docx" : "Список_рядовые.docx");
-        const firstEmployee = employees.find((item) => item.id === changeDocumentEntries[0].employeeId);
+        const firstEmployee = employees.find((item) => item.id === automaticListEntries[0].employeeId);
         if (firstEmployee) recordDocument(firstEmployee, documentType);
         setToast("Редактируемый Word подготовлен.");
       } catch {
@@ -1774,10 +1823,16 @@ export default function HomePage() {
                   <h3>Параметры документа</h3>
                   {!(["changes", "officerList", "enlistedList"] as DocumentType[]).includes(documentType) ? <label className="field"><span>Сотрудник</span><select value={documentEmployeeId} onChange={(e) => setDocumentEmployeeId(e.target.value)}><option value="">Выберите сотрудника</option>{employees.slice().sort((a,b)=>a.fullName.localeCompare(b.fullName,"ru")).map((employee)=><option value={employee.id} key={employee.id}>{employee.fullName}</option>)}</select></label> : null}
                   <div className="segmented document-types"><button className={documentType === "form10" ? "active" : ""} onClick={() => setDocumentType("form10")}>Форма № 10</button><button className={documentType === "f2" ? "active" : ""} onClick={() => setDocumentType("f2")}>Справка Ф-2</button><button className={documentType === "messageSheet" ? "active" : ""} onClick={() => setDocumentType("messageSheet")}>Листок сообщений</button><button className={documentType === "changes" ? "active" : ""} onClick={() => setDocumentType("changes")}>Изменение данных</button><button className={documentType === "employmentNotice" ? "active" : ""} onClick={() => setDocumentType("employmentNotice")}>Принятие / увольнение</button><button className={documentType === "officerList" ? "active" : ""} onClick={() => setDocumentType("officerList")}>Список: офицеры</button><button className={documentType === "enlistedList" ? "active" : ""} onClick={() => setDocumentType("enlistedList")}>Список: рядовые</button></div>
-                  {(["changes", "officerList", "enlistedList"] as DocumentType[]).includes(documentType) ? <div className="change-document-options">
+                  {documentType === "changes" ? <div className="change-document-options">
                     <label className="field"><span>Шапка документа</span><select value={documentHeaderLocation} onChange={(event) => setDocumentHeaderLocation(event.target.value as DocumentHeaderLocation)}><option value="moscow">Москва</option><option value="sochi">Сочи</option></select></label>
                     <div className="change-employee-add"><label className="field"><span>Добавить сотрудника</span><select value={changeEmployeeToAdd} onChange={(event)=>setChangeEmployeeToAdd(event.target.value)}><option value="">Выберите сотрудника</option>{employees.filter((employee)=>!changeDocumentEntries.some((entry)=>entry.employeeId===employee.id)).slice().sort((a,b)=>a.fullName.localeCompare(b.fullName,"ru")).map((employee)=><option value={employee.id} key={employee.id}>{employee.fullName}</option>)}</select></label><button type="button" className="button secondary" disabled={!changeEmployeeToAdd} onClick={()=>{setChangeDocumentEntries([...changeDocumentEntries,{employeeId:changeEmployeeToAdd,content:""}]);setChangeEmployeeToAdd("");}}><Plus size={16}/> Добавить</button></div>
                     <div className="change-entry-list">{changeDocumentEntries.map((entry)=>{const employee=employees.find((item)=>item.id===entry.employeeId);return <div className="change-entry" key={entry.employeeId}><div><strong>{employee?.fullName}</strong><button type="button" className="icon-button" aria-label="Удалить сотрудника из документа" onClick={()=>setChangeDocumentEntries(changeDocumentEntries.filter((item)=>item.employeeId!==entry.employeeId))}><Trash2 size={16}/></button></div>{documentType === "changes" ? <label className="field"><span>Содержание изменений</span><textarea value={entry.content} placeholder="Например: изменение места пребывания…" onChange={(event)=>setChangeDocumentEntries(changeDocumentEntries.map((item)=>item.employeeId===entry.employeeId?{...item,content:event.target.value}:item))}/></label> : null}</div>})}</div>
+                  </div> : null}
+                  {documentType === "officerList" || documentType === "enlistedList" ? <div className="change-document-options">
+                    <label className="field"><span>Шапка документа</span><select value={documentHeaderLocation} onChange={(event) => setDocumentHeaderLocation(event.target.value as DocumentHeaderLocation)}><option value="moscow">Москва</option><option value="sochi">Сочи</option></select></label>
+                    <div className="inline-success"><Check size={18}/><span><strong>Список сформирован автоматически</strong>Включены только действующие сотрудники с соответствующими воинскими званиями: {automaticListEntries.length}.</span></div>
+                    {employeesWithUnknownRank.length ? <div className="inline-warning"><AlertCircle size={18}/><span><strong>Не включены: {employeesWithUnknownRank.length}</strong>Не распознано звание: {employeesWithUnknownRank.slice(0, 4).map((employee) => `${employee.fullName} — ${employee.militaryRank || "не указано"}`).join("; ")}{employeesWithUnknownRank.length > 4 ? ` и ещё ${employeesWithUnknownRank.length - 4}` : ""}.</span></div> : null}
+                    <div className="change-entry-list">{automaticListEntries.map((entry)=>{const employee=employees.find((item)=>item.id===entry.employeeId);return <div className="change-entry" key={entry.employeeId}><div><strong>{employee?.fullName}</strong><span>{employee?.militaryRank}</span></div></div>})}</div>
                   </div> : null}
                   {documentType === "f2" || documentType === "employmentNotice" ? <div className="f2-options">
                     <label className="field"><span>Шапка документа</span><select value={documentHeaderLocation} onChange={(event) => setDocumentHeaderLocation(event.target.value as DocumentHeaderLocation)}><option value="moscow">Москва</option><option value="sochi">Сочи</option></select></label>
@@ -1798,16 +1853,16 @@ export default function HomePage() {
                   })() : null}
                   <div className="builder-actions">
                     <button className="button ghost" onClick={() => { const employee = employees.find((item) => item.id === documentEmployeeId); if (employee) setEmployeeModal(employee); }} disabled={(["changes", "officerList", "enlistedList"] as DocumentType[]).includes(documentType) || !documentEmployeeId}><Pencil size={17} /> Редактировать данные</button>
-                    <button className="button primary" onClick={downloadWord} disabled={(["changes", "officerList", "enlistedList"] as DocumentType[]).includes(documentType) ? !changeDocumentEntries.length : !documentEmployeeId}><FileDown size={18} /> Скачать Word</button>
+                    <button className="button primary" onClick={downloadWord} disabled={documentType === "changes" ? !changeDocumentEntries.length : documentType === "officerList" || documentType === "enlistedList" ? !automaticListEntries.length : !documentEmployeeId}><FileDown size={18} /> Скачать Word</button>
                   </div>
                 </section>
                 <section className="document-preview-card">
                   <div className="paper-preview">
                     <span>{documentType === "form10" ? "Форма № 10" : documentType === "f2" || documentType === "employmentNotice" ? "СВЕДЕНИЯ" : documentType === "changes" ? "СВЕДЕНИЯ ОБ ИЗМЕНЕНИЯХ" : documentType === "officerList" ? "СПИСОК: ОФИЦЕРЫ" : documentType === "enlistedList" ? "СПИСОК: РЯДОВЫЕ" : "ЛИСТОК СООБЩЕНИЯ"}</span>
-                    <strong>{(["changes", "officerList", "enlistedList"] as DocumentType[]).includes(documentType) ? `${changeDocumentEntries.length} сотрудник(а)` : documentEmployeeId ? employees.find((item) => item.id === documentEmployeeId)?.fullName : "Выберите сотрудника"}</strong>
+                    <strong>{documentType === "changes" ? `${changeDocumentEntries.length} сотрудник(а)` : documentType === "officerList" || documentType === "enlistedList" ? `${automaticListEntries.length} сотрудник(а)` : documentEmployeeId ? employees.find((item) => item.id === documentEmployeeId)?.fullName : "Выберите сотрудника"}</strong>
                     <div>{Array.from({ length: 10 }).map((_, index) => <i key={index} />)}</div>
                   </div>
-                  <p>{documentType === "form10" ? "Две страницы A4: лицевая и оборотная стороны." : documentType === "f2" || documentType === "employmentNotice" ? "Одна страница A4: сведения о принятии или увольнении." : (["changes", "officerList", "enlistedList"] as DocumentType[]).includes(documentType) ? "Групповой документ: одна строка на каждого выбранного сотрудника." : "Одна страница A4 с корешком по представленному образцу."}</p>
+                  <p>{documentType === "form10" ? "Две страницы A4: лицевая и оборотная стороны." : documentType === "f2" || documentType === "employmentNotice" ? "Одна страница A4: сведения о принятии или увольнении." : documentType === "officerList" || documentType === "enlistedList" ? "Список автоматически сформирован по воинским званиям действующих сотрудников." : documentType === "changes" ? "Групповой документ: одна строка на каждого выбранного сотрудника." : "Одна страница A4 с корешком по представленному образцу."}</p>
                 </section>
               </div>
               {documents.length ? <section className="history-section"><h3>Последние сформированные документы</h3><div className="data-panel history-list">{documents.slice(0,8).map((document) => <div key={document.id}><FileText size={17}/><span><strong>{document.title}</strong><small>{employees.find((employee)=>employee.id===document.employeeId)?.fullName ?? "Карточка удалена"}</small></span><time>{new Intl.DateTimeFormat("ru-RU",{dateStyle:"short",timeStyle:"short"}).format(new Date(document.createdAt))}</time></div>)}</div></section> : null}
