@@ -318,19 +318,22 @@ const requiredFields: { key: keyof Employee; label: string }[] = [
   { key: "militaryCommissariat", label: "военный комиссариат" },
 ];
 
-const enlistedRanks = new Set([
+const enlistedRankOrder = [
   "рядовой", "ефрейтор", "матрос", "старший матрос",
   "младший сержант", "сержант", "старший сержант", "старшина",
   "старшина 2 статьи", "старшина 1 статьи", "главный старшина", "главный корабельный старшина",
   "прапорщик", "старший прапорщик", "мичман", "старший мичман",
-]);
+];
 
-const officerRanks = new Set([
+const officerRankOrder = [
   "младший лейтенант", "лейтенант", "старший лейтенант", "капитан", "капитан лейтенант",
   "майор", "подполковник", "полковник", "капитан 3 ранга", "капитан 2 ранга", "капитан 1 ранга",
   "генерал майор", "генерал лейтенант", "генерал полковник", "генерал армии",
   "маршал российской федерации", "контр адмирал", "вице адмирал", "адмирал", "адмирал флота",
-]);
+];
+
+const enlistedRanks = new Set(enlistedRankOrder);
+const officerRanks = new Set(officerRankOrder);
 
 function normalizedMilitaryRank(value: string) {
   return value
@@ -351,6 +354,14 @@ function militaryRankGroup(rank: string): "enlisted" | "officer" | "unknown" {
   if (enlistedRanks.has(normalized)) return "enlisted";
   if (officerRanks.has(normalized)) return "officer";
   return "unknown";
+}
+
+function militaryRankOrder(rank: string) {
+  const normalized = normalizedMilitaryRank(rank);
+  const enlistedIndex = enlistedRankOrder.indexOf(normalized);
+  if (enlistedIndex >= 0) return enlistedIndex;
+  const officerIndex = officerRankOrder.indexOf(normalized);
+  return officerIndex >= 0 ? 100 + officerIndex : 999;
 }
 
 const federalHolidays2026 = new Set([
@@ -565,6 +576,40 @@ function getMissingFields(employee: Employee) {
 function cardCompleteness(employee: Employee) {
   const completed = requiredFields.length - getMissingFields(employee).length;
   return Math.round((completed / requiredFields.length) * 100);
+}
+
+type DocumentCheck = { critical: string[]; warnings: string[] };
+
+function checkDocumentEmployee(employee: Employee, type: DocumentType): DocumentCheck {
+  const checks: Partial<Record<keyof Employee, string>> = {
+    fullName: "Ф.И.О.", birthDate: "дата рождения", birthPlace: "место рождения",
+    militaryRank: "воинское звание", reserveCategory: "категория запаса",
+    composition: "состав", vus: "ВУС", fitnessCategory: "категория годности",
+    militaryDocNumber: "документ воинского учёта", militaryCommissariat: "военный комиссариат",
+    registrationAddress: "адрес регистрации", education: "образование",
+    maritalStatus: "семейное положение", position: "должность", department: "подразделение",
+  };
+  const requiredByType: Partial<Record<DocumentType, (keyof Employee)[]>> = {
+    form10: ["fullName", "birthDate", "birthPlace", "militaryRank", "reserveCategory", "composition", "vus", "fitnessCategory", "militaryDocNumber", "militaryCommissariat"],
+    f2: ["fullName", "birthDate", "birthPlace", "militaryRank", "vus", "militaryDocNumber", "position"],
+    employmentNotice: ["fullName", "birthDate", "birthPlace", "militaryRank", "vus", "militaryDocNumber", "position"],
+    messageSheet: ["fullName", "birthDate", "registrationAddress", "militaryDocNumber", "militaryCommissariat"],
+    officerList: ["fullName", "militaryRank", "reserveCategory", "composition", "vus", "fitnessCategory", "birthDate", "birthPlace", "education", "maritalStatus", "position", "department"],
+    enlistedList: ["fullName", "militaryRank", "reserveCategory", "composition", "vus", "fitnessCategory", "birthDate", "birthPlace", "education", "maritalStatus", "position", "department"],
+  };
+  const warningByType: Partial<Record<DocumentType, (keyof Employee)[]>> = {
+    form10: ["registrationAddress", "education", "maritalStatus", "position", "department"],
+    f2: ["registrationAddress", "militaryCommissariat"],
+    employmentNotice: ["registrationAddress", "militaryCommissariat"],
+    messageSheet: ["maritalStatus", "militaryRank", "vus"],
+  };
+  const missing = (keys: (keyof Employee)[]) => keys
+    .filter((key) => !String(employee[key] ?? "").trim())
+    .map((key) => checks[key] ?? String(key));
+  return {
+    critical: missing(requiredByType[type] ?? []),
+    warnings: missing(warningByType[type] ?? []),
+  };
 }
 
 function uniqueValues(employees: Employee[], key: keyof Employee) {
@@ -1074,7 +1119,7 @@ export default function HomePage() {
     const targetGroup = documentType === "officerList" ? "officer" : "enlisted";
     return employees
       .filter((employee) => employee.active && militaryRankGroup(employee.militaryRank) === targetGroup)
-      .sort((a, b) => a.fullName.localeCompare(b.fullName, "ru"))
+      .sort((a, b) => militaryRankOrder(a.militaryRank) - militaryRankOrder(b.militaryRank) || a.fullName.localeCompare(b.fullName, "ru"))
       .map((employee) => ({ employeeId: employee.id, content: "" }));
   }, [documentType, employees]);
 
@@ -1082,6 +1127,35 @@ export default function HomePage() {
     () => employees.filter((employee) => employee.active && militaryRankGroup(employee.militaryRank) === "unknown"),
     [employees],
   );
+
+  const selectedDocumentEmployee = employees.find((employee) => employee.id === documentEmployeeId);
+  const selectedDocumentCheck = selectedDocumentEmployee
+    ? checkDocumentEmployee(selectedDocumentEmployee, documentType)
+    : { critical: [], warnings: [] };
+  const listEmployeesWithGaps = automaticListEntries
+    .map((entry) => employees.find((employee) => employee.id === entry.employeeId))
+    .filter((employee): employee is Employee => Boolean(employee))
+    .map((employee) => ({ employee, check: checkDocumentEmployee(employee, documentType) }))
+    .filter(({ check }) => check.critical.length > 0);
+  const listRankDistribution = automaticListEntries.reduce<Record<string, number>>((result, entry) => {
+    const rank = employees.find((employee) => employee.id === entry.employeeId)?.militaryRank || "Не указано";
+    result[rank] = (result[rank] ?? 0) + 1;
+    return result;
+  }, {});
+  const documentSettingsMissing = [
+    !organization.organizationName && "наименование организации",
+    !organization.organizationAddress && "адрес организации",
+    !organization.responsiblePosition && "должность ответственного",
+    !organization.responsibleName && "Ф.И.О. ответственного",
+  ].filter((value): value is string => Boolean(value));
+  const documentParameterMissing = documentType === "f2" || documentType === "employmentNotice"
+    ? [!f2OrderNumber.trim() && "номер приказа", !f2OrderDate && "дата приказа"].filter((value): value is string => Boolean(value))
+    : [];
+  const hasCriticalDocumentGaps = documentType === "officerList" || documentType === "enlistedList"
+    ? listEmployeesWithGaps.length > 0 || documentSettingsMissing.length > 0
+    : documentType === "changes"
+      ? documentSettingsMissing.length > 0
+      : selectedDocumentCheck.critical.length > 0 || documentSettingsMissing.length > 0 || documentParameterMissing.length > 0;
 
   const backupAgeDays = lastBackupAt
     ? Math.floor((Date.now() - new Date(lastBackupAt).getTime()) / 86_400_000)
@@ -1499,6 +1573,9 @@ export default function HomePage() {
         setToast("В списке нет действующих сотрудников с подходящими воинскими званиями.");
         return;
       }
+      if ((listEmployeesWithGaps.length || documentSettingsMissing.length) && !window.confirm(
+        `Документ содержит пропуски.\n\nСотрудников с незаполненными графами: ${listEmployeesWithGaps.length}.${documentSettingsMissing.length ? `\nНастройки: ${documentSettingsMissing.join(", ")}.` : ""}\n\nСкачать Word с пропусками?`,
+      )) return;
       try {
         setToast("Формируется список сотрудников…");
         const blob = await buildPersonnelListDocx(
@@ -1526,6 +1603,7 @@ export default function HomePage() {
         setToast("Заполните содержание изменений для каждого сотрудника.");
         return;
       }
+      if (documentSettingsMissing.length && !window.confirm(`В настройках не заполнено: ${documentSettingsMissing.join(", ")}.\n\nСкачать Word с пропусками?`)) return;
       try {
         setToast("Формируются сведения об изменениях…");
         const blob = await buildChangesDocx(changeDocumentEntries, employees, organization, documentHeaderLocation);
@@ -1543,10 +1621,8 @@ export default function HomePage() {
       setToast("Выберите сотрудника.");
       return;
     }
-    if ((documentType === "f2" || documentType === "employmentNotice") && (!f2OrderNumber.trim() || !f2OrderDate)) {
-      setToast("Для справки Ф-2 укажите номер и дату приказа (трудового договора).");
-      return;
-    }
+    const allDocumentGaps = [...selectedDocumentCheck.critical, ...documentParameterMissing, ...documentSettingsMissing];
+    if (allDocumentGaps.length && !window.confirm(`Для выбранного документа не заполнено: ${allDocumentGaps.join(", ")}.\n\nСкачать Word с пропусками?`)) return;
     try {
       setToast("Формируется редактируемый Word…");
       const blob = await buildDocx(
@@ -1898,6 +1974,8 @@ export default function HomePage() {
                   {documentType === "officerList" || documentType === "enlistedList" ? <div className="change-document-options">
                     <label className="field"><span>Шапка документа</span><select value={documentHeaderLocation} onChange={(event) => setDocumentHeaderLocation(event.target.value as DocumentHeaderLocation)}><option value="moscow">Москва</option><option value="sochi">Сочи</option></select></label>
                     <div className="inline-success"><Check size={18}/><span><strong>Список сформирован автоматически</strong>Включены только действующие сотрудники с соответствующими воинскими званиями: {automaticListEntries.length}.</span></div>
+                    <div className="document-check-summary"><strong>По званиям</strong><div>{Object.entries(listRankDistribution).map(([rank, count]) => <span className="status completed" key={rank}>{rank}: {count}</span>)}</div></div>
+                    {listEmployeesWithGaps.length ? <div className="inline-warning"><AlertCircle size={18}/><span><strong>Незаполненные графы: {listEmployeesWithGaps.length} сотрудник(а)</strong>{listEmployeesWithGaps.slice(0, 4).map(({employee, check}) => `${employee.fullName}: ${check.critical.join(", ")}`).join("; ")}{listEmployeesWithGaps.length > 4 ? ` и ещё ${listEmployeesWithGaps.length - 4}` : ""}.</span></div> : null}
                     {employeesWithUnknownRank.length ? <div className="inline-warning"><AlertCircle size={18}/><span><strong>Не включены: {employeesWithUnknownRank.length}</strong>Не распознано звание: {employeesWithUnknownRank.slice(0, 4).map((employee) => `${employee.fullName} — ${employee.militaryRank || "не указано"}`).join("; ")}{employeesWithUnknownRank.length > 4 ? ` и ещё ${employeesWithUnknownRank.length - 4}` : ""}.</span></div> : null}
                     <div className="change-entry-list">{automaticListEntries.map((entry)=>{const employee=employees.find((item)=>item.id===entry.employeeId);return <div className="change-entry" key={entry.employeeId}><div><strong>{employee?.fullName}</strong><span>{employee?.militaryRank}</span></div></div>})}</div>
                   </div> : null}
@@ -1913,14 +1991,12 @@ export default function HomePage() {
                       <Field required type="date" label="Дата приказа (трудового договора)" value={f2OrderDate} onChange={setF2OrderDate}/>
                     </div>
                   </div> : null}
-                  {!(["changes", "officerList", "enlistedList"] as DocumentType[]).includes(documentType) && documentEmployeeId ? (() => {
-                    const employee = employees.find((item) => item.id === documentEmployeeId);
-                    const missing = employee ? getMissingFields(employee) : [];
-                    return missing.length ? <div className="inline-warning"><AlertCircle size={18} /><span><strong>Перед выгрузкой проверьте карточку</strong>Не заполнено: {missing.slice(0,5).join(", ")}{missing.length > 5 ? ` и ещё ${missing.length-5}` : ""}.</span></div> : <div className="inline-success"><Check size={18} /> Основные поля заполнены</div>;
-                  })() : null}
+                  {!(["changes", "officerList", "enlistedList"] as DocumentType[]).includes(documentType) && documentEmployeeId ? selectedDocumentCheck.critical.length || documentParameterMissing.length ? <div className="inline-warning"><AlertCircle size={18}/><span><strong>Критические пропуски для этого документа</strong>{[...selectedDocumentCheck.critical, ...documentParameterMissing].join(", ")}.</span></div> : <div className="inline-success"><Check size={18}/> Обязательные поля выбранного документа заполнены</div> : null}
+                  {selectedDocumentCheck.warnings.length && !(["changes", "officerList", "enlistedList"] as DocumentType[]).includes(documentType) ? <div className="inline-warning"><Info size={18}/><span><strong>Рекомендуется дополнить</strong>{selectedDocumentCheck.warnings.join(", ")}.</span></div> : null}
+                  {documentSettingsMissing.length ? <div className="inline-warning"><Settings size={18}/><span><strong>Проверьте настройки организации</strong>Не заполнено: {documentSettingsMissing.join(", ")}.</span></div> : null}
                   <div className="builder-actions">
                     <button className="button ghost" onClick={() => { const employee = employees.find((item) => item.id === documentEmployeeId); if (employee) setEmployeeModal(employee); }} disabled={(["changes", "officerList", "enlistedList"] as DocumentType[]).includes(documentType) || !documentEmployeeId}><Pencil size={17} /> Редактировать данные</button>
-                    <button className="button primary" onClick={downloadWord} disabled={documentType === "changes" ? !changeDocumentEntries.length : documentType === "officerList" || documentType === "enlistedList" ? !automaticListEntries.length : !documentEmployeeId}><FileDown size={18} /> Скачать Word</button>
+                    <button className="button primary" onClick={downloadWord} disabled={documentType === "changes" ? !changeDocumentEntries.length : documentType === "officerList" || documentType === "enlistedList" ? !automaticListEntries.length : !documentEmployeeId}><FileDown size={18} /> {hasCriticalDocumentGaps ? "Скачать с пропусками" : "Скачать Word"}</button>
                   </div>
                 </section>
                 <section className="document-preview-card">
@@ -1928,6 +2004,26 @@ export default function HomePage() {
                     <span>{documentType === "form10" ? "Форма № 10" : documentType === "f2" || documentType === "employmentNotice" ? "СВЕДЕНИЯ" : documentType === "changes" ? "СВЕДЕНИЯ ОБ ИЗМЕНЕНИЯХ" : documentType === "officerList" ? "СПИСОК: ОФИЦЕРЫ" : documentType === "enlistedList" ? "СПИСОК: РЯДОВЫЕ" : "ЛИСТОК СООБЩЕНИЯ"}</span>
                     <strong>{documentType === "changes" ? `${changeDocumentEntries.length} сотрудник(а)` : documentType === "officerList" || documentType === "enlistedList" ? `${automaticListEntries.length} сотрудник(а)` : documentEmployeeId ? employees.find((item) => item.id === documentEmployeeId)?.fullName : "Выберите сотрудника"}</strong>
                     <div>{Array.from({ length: 10 }).map((_, index) => <i key={index} />)}</div>
+                  </div>
+                  <div className="preview-data">
+                    <h4>Проверка перед выгрузкой</h4>
+                    {(documentType === "f2" || documentType === "employmentNotice" || documentType === "changes" || documentType === "officerList" || documentType === "enlistedList") ? <div><span>Шапка</span><strong>{documentHeaderLocation === "moscow" ? "Москва" : "Сочи"}</strong></div> : null}
+                    {selectedDocumentEmployee && !(["changes", "officerList", "enlistedList"] as DocumentType[]).includes(documentType) ? <>
+                      <div><span>Сотрудник</span><strong>{selectedDocumentEmployee.fullName}</strong></div>
+                      <div><span>Звание / ВУС</span><strong>{selectedDocumentEmployee.militaryRank || "—"} / {selectedDocumentEmployee.vus || "—"}</strong></div>
+                      <div><span>Документ воинского учёта</span><strong>{selectedDocumentEmployee.militaryDocNumber || "—"}</strong></div>
+                      <div><span>Военный комиссариат</span><strong>{selectedDocumentEmployee.militaryCommissariat || "—"}</strong></div>
+                      {documentType === "f2" || documentType === "employmentNotice" ? <>
+                        <div><span>Событие</span><strong>{f2Event === "hire" ? "Принятие" : "Увольнение"}</strong></div>
+                        <div><span>Приказ</span><strong>№ {f2OrderNumber || "—"} от {formatDate(f2OrderDate, "—")}</strong></div>
+                      </> : null}
+                    </> : null}
+                    {documentType === "officerList" || documentType === "enlistedList" ? <>
+                      <div><span>Включено</span><strong>{automaticListEntries.length}</strong></div>
+                      <div><span>С пропусками</span><strong>{listEmployeesWithGaps.length}</strong></div>
+                      <div><span>Нераспознанные звания</span><strong>{employeesWithUnknownRank.length}</strong></div>
+                    </> : null}
+                    {documentType === "changes" ? <div><span>Включено сотрудников</span><strong>{changeDocumentEntries.length}</strong></div> : null}
                   </div>
                   <p>{documentType === "form10" ? "Две страницы A4: лицевая и оборотная стороны." : documentType === "f2" || documentType === "employmentNotice" ? "Одна страница A4: сведения о принятии или увольнении." : documentType === "officerList" || documentType === "enlistedList" ? "Список автоматически сформирован по воинским званиям действующих сотрудников." : documentType === "changes" ? "Групповой документ: одна строка на каждого выбранного сотрудника." : "Одна страница A4 с корешком по представленному образцу."}</p>
                 </section>
