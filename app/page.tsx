@@ -3,6 +3,7 @@
 import { ChangeEvent, FormEvent, useEffect, useMemo, useRef, useState } from "react";
 import { strFromU8, strToU8, unzipSync, zipSync } from "fflate";
 import * as XLSX from "xlsx";
+import { LIST_TEMPLATE_BASE64 } from "./generated-list-templates";
 import {
   AlertCircle,
   ArchiveRestore,
@@ -192,7 +193,7 @@ type Rule = {
 
 const STORAGE_KEY = "voinskiy-uchet-v1";
 const LAST_BACKUP_KEY = "voinskiy-uchet-last-backup";
-const APP_VERSION = "19";
+const APP_VERSION = "19.1";
 
 const RULES: Rule[] = [
   {
@@ -714,6 +715,11 @@ function assetUrl(name: string) {
   return `${process.env.NEXT_PUBLIC_BASE_PATH ?? ""}/documents/${name}`;
 }
 
+function bytesFromBase64(value: string) {
+  const binary = window.atob(value);
+  return Uint8Array.from(binary, (character) => character.charCodeAt(0));
+}
+
 function xmlValue(value: unknown) {
   return String(value ?? "")
     .replaceAll("&", "&amp;")
@@ -947,9 +953,14 @@ async function buildPersonnelListDocx(
   headerLocation: DocumentHeaderLocation,
 ) {
   const templateName = type === "officerList" ? "officer-list-template.docx" : "enlisted-list-template.docx";
-  const response = await fetch(assetUrl(templateName));
-  if (!response.ok) throw new Error("Не удалось загрузить шаблон Word");
-  const archive = unzipSync(new Uint8Array(await response.arrayBuffer()));
+  let archive: ReturnType<typeof unzipSync>;
+  try {
+    const response = await fetch(assetUrl(templateName));
+    if (!response.ok) throw new Error(`Шаблон недоступен: ${response.status}`);
+    archive = unzipSync(new Uint8Array(await response.arrayBuffer()));
+  } catch {
+    archive = unzipSync(bytesFromBase64(LIST_TEMPLATE_BASE64[type]));
+  }
   const documentPath = "word/document.xml";
   let xml = strFromU8(archive[documentPath]);
   const marker = "{{LIST_ROW_NUMBER}}";

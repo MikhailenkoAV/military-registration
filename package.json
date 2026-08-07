@@ -7,8 +7,9 @@
   },
   "scripts": {
     "dev": "next dev",
-    "build": "next build",
-    "build:github": "GITHUB_PAGES=true NEXT_PUBLIC_BASE_PATH=/military-registration next build",
+    "embed:templates": "node scripts/embed-list-templates.mjs",
+    "build": "npm run embed:templates && next build",
+    "build:github": "npm run embed:templates && GITHUB_PAGES=true NEXT_PUBLIC_BASE_PATH=/military-registration next build",
     "start": "next start",
     "lint": "eslint . --ignore-pattern .next --ignore-pattern dist",
     "test": "npm run lint && npm run build"
