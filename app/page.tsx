@@ -40,6 +40,7 @@ type View =
   | "dashboard"
   | "employees"
   | "notifications"
+  | "workPlan"
   | "documents"
   | "reconciliations"
   | "settings";
@@ -117,6 +118,7 @@ type Notice = {
   completedAt: string;
   outgoingNumber: string;
   note: string;
+  completedByDocumentId?: string;
 };
 
 type DocumentRecord = {
@@ -135,6 +137,7 @@ type DocumentRecord = {
   employeeCount?: number;
   outgoingNumber?: string;
   sentAt?: string;
+  noticeIds?: string[];
 };
 
 type EmployeeFieldChange = {
@@ -189,6 +192,7 @@ type Rule = {
 
 const STORAGE_KEY = "voinskiy-uchet-v1";
 const LAST_BACKUP_KEY = "voinskiy-uchet-last-backup";
+const APP_VERSION = "19";
 
 const RULES: Rule[] = [
   {
@@ -324,6 +328,7 @@ const navItems: { id: View; label: string; icon: typeof Home }[] = [
   { id: "dashboard", label: "Главная", icon: Home },
   { id: "employees", label: "Сотрудники", icon: Users },
   { id: "notifications", label: "Уведомления", icon: Bell },
+  { id: "workPlan", label: "Рабочий план", icon: CalendarCheck },
   { id: "documents", label: "Документы", icon: FileText },
   { id: "reconciliations", label: "Сверки", icon: ListChecks },
   { id: "settings", label: "Настройки", icon: Settings },
@@ -507,7 +512,7 @@ function emptyEmployee(settings: OrganizationSettings): Employee {
 
 function parseLocalDate(value: string) {
   if (!value) return null;
-  const [year, month, day] = value.split("-").map(Number);
+  const [year, month, day] = value.slice(0, 10).split("-").map(Number);
   if (!year || !month || !day) return null;
   return new Date(year, month - 1, day);
 }
@@ -1121,6 +1126,8 @@ export default function HomePage() {
   const [sortDirection, setSortDirection] = useState<"asc" | "desc">("asc");
   const [noticeSearch, setNoticeSearch] = useState("");
   const [noticeFilter, setNoticeFilter] = useState("open");
+  const [workPlanMonth, setWorkPlanMonth] = useState(todayIso().slice(0, 7));
+  const [workPlanStatus, setWorkPlanStatus] = useState("all");
   const [documentEmployeeId, setDocumentEmployeeId] = useState("");
   const [documentType, setDocumentType] = useState<DocumentType>("form10");
   const [f2Event, setF2Event] = useState<"hire" | "dismissal">("hire");
@@ -1306,6 +1313,51 @@ export default function HomePage() {
         return a.dueDate.localeCompare(b.dueDate);
       });
   }, [notices, employees, noticeSearch, noticeFilter]);
+
+  const workPlanRows = useMemo(() => notices
+    .filter((notice) => notice.dueDate.startsWith(workPlanMonth))
+    .filter((notice) => workPlanStatus === "all" || (workPlanStatus === "completed" ? Boolean(notice.completedAt) : !notice.completedAt))
+    .map((notice) => {
+      const employee = employees.find((item) => item.id === notice.employeeId);
+      const rule = RULES.find((item) => item.id === notice.ruleId);
+      const document = documents.find((item) => item.noticeIds?.includes(notice.id));
+      return { notice, employee, rule, document, status: noticeStatus(notice) };
+    })
+    .sort((a, b) => a.notice.dueDate.localeCompare(b.notice.dueDate) || (a.employee?.fullName ?? "").localeCompare(b.employee?.fullName ?? "", "ru")),
+  [notices, employees, documents, workPlanMonth, workPlanStatus]);
+
+  const workPlanSummary = {
+    total: workPlanRows.length,
+    open: workPlanRows.filter((row) => !row.notice.completedAt).length,
+    overdue: workPlanRows.filter((row) => row.status === "overdue").length,
+    completed: workPlanRows.filter((row) => Boolean(row.notice.completedAt)).length,
+  };
+
+  const duplicateEmployeeGroups = useMemo(() => {
+    const groups = new Map<string, Employee[]>();
+    employees.forEach((employee) => {
+      const key = `${employee.fullName.trim().toLocaleLowerCase("ru-RU")}|${employee.birthDate}`;
+      if (!employee.fullName.trim()) return;
+      groups.set(key, [...(groups.get(key) ?? []), employee]);
+    });
+    return [...groups.values()].filter((group) => group.length > 1);
+  }, [employees]);
+  const orphanNotices = notices.filter((notice) => !employees.some((employee) => employee.id === notice.employeeId));
+  const orphanDocuments = documents.filter((record) => {
+    const ids = record.employeeIds?.length ? record.employeeIds : [record.employeeId];
+    return ids.some((id) => !employees.some((employee) => employee.id === id));
+  });
+  const incompleteActiveEmployees = employees.filter((employee) => employee.active && getMissingFields(employee).length);
+  const diagnosticIssues: { level: "error" | "warning"; title: string; detail: string; view?: View }[] = [];
+  if (orphanNotices.length) diagnosticIssues.push({ level: "error", title: "Задачи без карточки сотрудника", detail: `${orphanNotices.length} шт.`, view: "notifications" });
+  if (orphanDocuments.length) diagnosticIssues.push({ level: "error", title: "Документы с отсутствующей карточкой", detail: `${orphanDocuments.length} шт.`, view: "documents" });
+  if (duplicateEmployeeGroups.length) diagnosticIssues.push({ level: "error", title: "Возможные дубли сотрудников", detail: `${duplicateEmployeeGroups.length} совпадений`, view: "employees" });
+  if (incompleteActiveEmployees.length) diagnosticIssues.push({ level: "warning", title: "Неполные карточки работающих", detail: `${incompleteActiveEmployees.length} шт.`, view: "employees" });
+  if (overdueCount) diagnosticIssues.push({ level: "warning", title: "Просроченные задачи", detail: `${overdueCount} шт.`, view: "notifications" });
+  if (employeesWithUnknownRank.length) diagnosticIssues.push({ level: "warning", title: "Нераспознанные воинские звания", detail: `${employeesWithUnknownRank.length} шт.`, view: "employees" });
+  if (documentSettingsMissing.length) diagnosticIssues.push({ level: "warning", title: "Не заполнены настройки документов", detail: documentSettingsMissing.join(", "), view: "settings" });
+  if (backupIsDue) diagnosticIssues.push({ level: "warning", title: "Требуется резервная копия", detail: lastBackupAt ? `Последняя создана ${backupAgeDays} дн. назад` : "Резервная копия не создавалась", view: "settings" });
+  const diagnosticErrorCount = diagnosticIssues.filter((item) => item.level === "error").length;
 
   const dashboardItems = useMemo(() => {
     const legal = pendingNotices
@@ -1688,10 +1740,48 @@ export default function HomePage() {
     );
   }
 
+  function prepareDocumentForNotice(notice: Notice) {
+    const employee = employees.find((item) => item.id === notice.employeeId);
+    if (!employee) {
+      setToast("Карточка сотрудника не найдена.");
+      return;
+    }
+    if (notice.ruleId === "hire" || notice.ruleId === "dismissal") {
+      setDocumentType("f2");
+      setDocumentEmployeeId(employee.id);
+      setF2Event(notice.ruleId === "hire" ? "hire" : "dismissal");
+      setF2OrderNumber(employee.orderNumber);
+      setF2OrderDate(employee.orderDate || notice.eventDate);
+    } else if (notice.ruleId === "change") {
+      setDocumentType("changes");
+      setDocumentEmployeeId(employee.id);
+      setChangeDocumentEntries([{ employeeId: employee.id, content: notice.note }]);
+    } else {
+      setDocumentEmployeeId(employee.id);
+    }
+    navigate("documents");
+    window.scrollTo({ top: 0, behavior: "smooth" });
+    setToast("Параметры документа заполнены из задачи.");
+  }
+
+  function matchingNoticeIds(type: DocumentType, employeeIds: string[]) {
+    const ruleId = type === "f2" || type === "employmentNotice"
+      ? (f2Event === "hire" ? "hire" : "dismissal")
+      : type === "changes"
+        ? "change"
+        : "";
+    if (!ruleId) return [];
+    return notices
+      .filter((notice) => !notice.completedAt && notice.ruleId === ruleId && employeeIds.includes(notice.employeeId))
+      .map((notice) => notice.id);
+  }
+
   function recordDocument(employee: Employee, type: DocumentType, employeeIds = [employee.id], entries?: ChangeDocumentEntry[]) {
+    const id = makeId();
+    const noticeIds = matchingNoticeIds(type, employeeIds);
     setDocuments((current) => [
       {
-        id: makeId(),
+        id,
         employeeId: employee.id,
         type,
         createdAt: new Date().toISOString(),
@@ -1705,6 +1795,7 @@ export default function HomePage() {
         changeEntries: entries?.map((entry) => ({ ...entry })),
         outgoingNumber: "",
         sentAt: "",
+        noticeIds,
         title: type === "form10"
           ? "Форма № 10"
           : type === "f2"
@@ -1730,8 +1821,21 @@ export default function HomePage() {
       const sentAt = window.prompt("Дата отправки (ГГГГ-ММ-ДД):", record.sentAt || todayIso());
       if (!sentAt) return;
       setDocuments((current) => current.map((item) => item.id === record.id ? { ...item, status, outgoingNumber, sentAt } : item));
-      setToast("Документ отмечен отправленным.");
+      const linkedIds = new Set(record.noticeIds ?? []);
+      if (linkedIds.size) {
+        setNotices((current) => current.map((notice) => linkedIds.has(notice.id)
+          ? { ...notice, completedAt: `${sentAt}T12:00:00`, outgoingNumber, completedByDocumentId: record.id }
+          : notice));
+      }
+      setToast(linkedIds.size
+        ? `Документ отправлен. Связанных задач закрыто: ${linkedIds.size}.`
+        : "Документ отмечен отправленным.");
       return;
+    }
+    if ((record.status ?? "formed") === "sent") {
+      setNotices((current) => current.map((notice) => notice.completedByDocumentId === record.id
+        ? { ...notice, completedAt: "", outgoingNumber: "", completedByDocumentId: undefined }
+        : notice));
     }
     setDocuments((current) => current.map((item) => item.id === record.id ? { ...item, status } : item));
     setToast(status === "signed" ? "Документ отмечен подписанным." : "Статус возвращён: сформирован.");
@@ -1875,6 +1979,86 @@ export default function HomePage() {
     setToast("Резервная копия создана.");
   }
 
+  function exportWorkPlan() {
+    if (!workPlanRows.length) {
+      setToast("В выбранном месяце нет задач для выгрузки.");
+      return;
+    }
+    const rows = workPlanRows.map(({ notice, employee, rule, document, status }, index) => ({
+      "№": index + 1,
+      "Срок": formatDate(notice.dueDate),
+      "Сотрудник": employee?.fullName ?? "Карточка удалена",
+      "Подразделение": employee?.department ?? "",
+      "Задача": rule?.title ?? "Задача",
+      "Дата события": formatDate(notice.eventDate),
+      "Статус": statusLabel(status, notice.dueDate),
+      "Документ": document?.title ?? "Не сформирован",
+      "Статус документа": document ? (document.status === "sent" ? "Отправлен" : document.status === "signed" ? "Подписан" : "Сформирован") : "",
+      "Дата отправки": formatDate(document?.sentAt ?? notice.completedAt, ""),
+      "Исходящий №": document?.outgoingNumber || notice.outgoingNumber,
+      "Примечание": notice.note,
+    }));
+    const worksheet = XLSX.utils.json_to_sheet(rows);
+    worksheet["!cols"] = [5, 13, 32, 24, 42, 15, 18, 34, 20, 17, 18, 36].map((wch) => ({ wch }));
+    worksheet["!autofilter"] = { ref: worksheet["!ref"] ?? "A1:L1" };
+    const workbook = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(workbook, worksheet, "Рабочий план");
+    XLSX.writeFile(workbook, `Рабочий_план_${workPlanMonth}.xlsx`);
+    setToast("Рабочий план выгружен в Excel.");
+  }
+
+  function exportControlReport() {
+    const workbook = XLSX.utils.book_new();
+    const summary = XLSX.utils.json_to_sheet([
+      { "Показатель": "Версия программы", "Значение": APP_VERSION },
+      { "Показатель": "Дата проверки", "Значение": formatDate(todayIso()) },
+      { "Показатель": "Всего сотрудников", "Значение": employees.length },
+      { "Показатель": "Работающих", "Значение": employees.filter((employee) => employee.active).length },
+      { "Показатель": "Открытых задач", "Значение": pendingNotices.length },
+      { "Показатель": "Просроченных задач", "Значение": overdueCount },
+      { "Показатель": "Документов в истории", "Значение": documents.length },
+      { "Показатель": "Ошибок целостности", "Значение": diagnosticErrorCount },
+      { "Показатель": "Всего замечаний", "Значение": diagnosticIssues.length },
+    ]);
+    summary["!cols"] = [{ wch: 32 }, { wch: 28 }];
+    XLSX.utils.book_append_sheet(workbook, summary, "Итоги");
+
+    const gaps = XLSX.utils.json_to_sheet(incompleteActiveEmployees.map((employee) => ({
+      "Сотрудник": employee.fullName,
+      "Подразделение": employee.department,
+      "Заполнено, %": cardCompleteness(employee),
+      "Не заполнено": getMissingFields(employee).join(", "),
+    })));
+    gaps["!cols"] = [{ wch: 34 }, { wch: 25 }, { wch: 15 }, { wch: 70 }];
+    XLSX.utils.book_append_sheet(workbook, gaps, "Неполные карточки");
+
+    const tasks = XLSX.utils.json_to_sheet(pendingNotices.map((notice) => {
+      const employee = employees.find((item) => item.id === notice.employeeId);
+      const rule = RULES.find((item) => item.id === notice.ruleId);
+      return {
+        "Срок": formatDate(notice.dueDate),
+        "Статус": statusLabel(noticeStatus(notice), notice.dueDate),
+        "Сотрудник": employee?.fullName ?? "Карточка отсутствует",
+        "Задача": rule?.title ?? notice.ruleId,
+        "Примечание": notice.note,
+      };
+    }));
+    tasks["!cols"] = [{ wch: 14 }, { wch: 18 }, { wch: 34 }, { wch: 48 }, { wch: 45 }];
+    XLSX.utils.book_append_sheet(workbook, tasks, "Открытые задачи");
+
+    const integrityRows = [
+      ...duplicateEmployeeGroups.map((group) => ({ "Тип": "Возможный дубль", "Объект": group.map((employee) => employee.fullName).join("; "), "Описание": `Дата рождения: ${group[0].birthDate || "не указана"}` })),
+      ...orphanNotices.map((notice) => ({ "Тип": "Задача без карточки", "Объект": notice.id, "Описание": RULES.find((rule) => rule.id === notice.ruleId)?.title ?? notice.ruleId })),
+      ...orphanDocuments.map((record) => ({ "Тип": "Документ без карточки", "Объект": record.title, "Описание": formatDate(record.createdAt) })),
+      ...employeesWithUnknownRank.map((employee) => ({ "Тип": "Не распознано звание", "Объект": employee.fullName, "Описание": employee.militaryRank || "не указано" })),
+    ];
+    const integrity = XLSX.utils.json_to_sheet(integrityRows.length ? integrityRows : [{ "Тип": "Ошибок не найдено", "Объект": "—", "Описание": "Связи и воинские звания проверены" }]);
+    integrity["!cols"] = [{ wch: 28 }, { wch: 42 }, { wch: 55 }];
+    XLSX.utils.book_append_sheet(workbook, integrity, "Диагностика");
+    XLSX.writeFile(workbook, `Контрольный_отчет_${todayIso()}.xlsx`);
+    setToast("Контрольный отчёт выгружен в Excel.");
+  }
+
   async function restoreBackup(event: ChangeEvent<HTMLInputElement>) {
     const file = event.target.files?.[0];
     event.target.value = "";
@@ -1935,7 +2119,7 @@ export default function HomePage() {
           </div>
           <div>
             <strong>ВОИНСКИЙ УЧЁТ</strong>
-            <span>рабочий контур</span>
+            <span>рабочий контур · версия {APP_VERSION}</span>
           </div>
         </div>
         <nav aria-label="Основная навигация">
@@ -2152,6 +2336,39 @@ export default function HomePage() {
             </>
           ) : null}
 
+          {view === "workPlan" ? (
+            <>
+              <section className="section-heading compact">
+                <div><span className="eyebrow">Организация работы</span><h2>Рабочий план</h2><p>Задачи автоматически собраны по установленным срокам исполнения.</p></div>
+                <button className="button primary small" onClick={exportWorkPlan}><FileSpreadsheet size={17}/> Выгрузить Excel</button>
+              </section>
+              <div className="filter-panel work-plan-filters">
+                <label><span>Месяц</span><input type="month" value={workPlanMonth} onChange={(event)=>setWorkPlanMonth(event.target.value)}/></label>
+                <label><span>Исполнение</span><select value={workPlanStatus} onChange={(event)=>setWorkPlanStatus(event.target.value)}><option value="all">Все задачи</option><option value="open">Открытые</option><option value="completed">Исполненные</option></select></label>
+              </div>
+              <section className="work-plan-summary" aria-label="Итоги рабочего плана">
+                <div><span>Всего</span><strong>{workPlanSummary.total}</strong></div>
+                <div><span>Открыто</span><strong>{workPlanSummary.open}</strong></div>
+                <div className={workPlanSummary.overdue ? "danger" : ""}><span>Просрочено</span><strong>{workPlanSummary.overdue}</strong></div>
+                <div><span>Исполнено</span><strong>{workPlanSummary.completed}</strong></div>
+              </section>
+              {workPlanRows.length ? <div className="data-panel table-scroll">
+                <table className="registry-table work-plan-table">
+                  <thead><tr><th>Срок</th><th>Сотрудник</th><th>Задача</th><th>Статус</th><th>Документ</th><th>Исходящий №</th><th></th></tr></thead>
+                  <tbody>{workPlanRows.map(({notice,employee,rule,document,status})=><tr key={notice.id}>
+                    <td className="mono">{formatDate(notice.dueDate)}</td>
+                    <td><button className="employee-link" disabled={!employee} onClick={()=>employee&&setEmployeeModal(employee)}><span><strong>{employee?.fullName??"Карточка удалена"}</strong><small>{employee?.department||"Подразделение не указано"}</small></span></button></td>
+                    <td>{rule?.title??"Задача"}</td>
+                    <td><span className={`status ${status}`}>{statusLabel(status,notice.dueDate)}</span></td>
+                    <td><span className="work-plan-document"><strong>{document?.title??"Не сформирован"}</strong>{document?<small>{document.status==="sent"?"Отправлен":document.status==="signed"?"Подписан":"Сформирован"}</small>:["hire","dismissal","change"].includes(notice.ruleId)?<button className="inline-link" onClick={()=>prepareDocumentForNotice(notice)}>Подготовить документ</button>:null}</span></td>
+                    <td>{document?.outgoingNumber||notice.outgoingNumber||"—"}</td>
+                    <td>{status==="completed"?<button className="button ghost small" onClick={()=>reopenNotice(notice)}><RotateCcw size={14}/> Вернуть</button>:<button className="button secondary small" onClick={()=>completeNotice(notice)}><Check size={14}/> Исполнено</button>}</td>
+                  </tr>)}</tbody>
+                </table>
+              </div>:<div className="empty-state compact-empty"><CalendarCheck size={32}/><h3>В выбранном месяце задач нет</h3><p>Задачи появятся здесь автоматически после создания события.</p></div>}
+            </>
+          ) : null}
+
           {view === "documents" ? (
             <>
               <section className="section-heading compact"><div><span className="eyebrow">Редактируемый Word</span><h2>Формирование документов</h2><p>Форма № 10, справка Ф-2 и «Листок сообщений» выгружаются заполненными в формате DOCX.</p></div></section>
@@ -2239,6 +2456,7 @@ export default function HomePage() {
                       {record.headerLocation ? <span><b>Шапка:</b> {record.headerLocation === "moscow" ? "Москва" : "Сочи"}</span> : null}
                       {record.eventType ? <span><b>Событие:</b> {record.eventType === "hire" ? "Приём" : "Увольнение"}</span> : null}
                       {record.orderNumber || record.orderDate ? <span><b>Приказ:</b> № {record.orderNumber || "—"} от {formatDate(record.orderDate ?? "", "—")}</span> : null}
+                      {record.noticeIds?.length ? <span><b>Связанные задачи:</b> {record.noticeIds.length}{status === "sent" ? " · закрыты автоматически" : " · закроются после отправки"}</span> : null}
                       {status === "sent" ? <span><b>Отправлен:</b> {formatDate(record.sentAt ?? "", "—")} · исх. № {record.outgoingNumber || "—"}</span> : null}
                     </div>
                     <div className="document-history-actions">
@@ -2302,6 +2520,14 @@ export default function HomePage() {
                   <div className="settings-actions"><button className="button primary" onClick={exportBackup}><Download size={17}/> Создать резервную копию</button><input ref={backupInput} hidden type="file" accept=".json" onChange={restoreBackup}/><button className="button secondary" onClick={()=>backupInput.current?.click()}><ArchiveRestore size={17}/> Восстановить</button><button className="button danger-outline" onClick={clearAllData}><Trash2 size={17}/> Очистить данные</button></div>
                 </section>
               </div>
+              <section className="data-panel diagnostics-card">
+                <div className="diagnostics-heading">
+                  <div className="card-title"><span className={`kpi-icon ${diagnosticErrorCount ? "red" : diagnosticIssues.length ? "amber" : "teal"}`}><ShieldCheck size={20}/></span><div><h3>Диагностика базы</h3><p>Проверка связей, дублей, полноты карточек, сроков и резервного копирования.</p></div></div>
+                  <button className="button secondary small" onClick={exportControlReport}><FileSpreadsheet size={16}/> Контрольный отчёт</button>
+                </div>
+                <div className="diagnostics-summary"><span><strong>{diagnosticErrorCount}</strong> ошибок целостности</span><span><strong>{diagnosticIssues.length-diagnosticErrorCount}</strong> предупреждений</span><span><strong>{employees.length+notices.length+documents.length}</strong> записей проверено</span></div>
+                {diagnosticIssues.length ? <div className="diagnostics-list">{diagnosticIssues.map((issue,index)=><div className={issue.level} key={`${issue.title}-${index}`}><span>{issue.level==="error"?<AlertCircle size={17}/>:<Info size={17}/>}<strong>{issue.title}</strong><small>{issue.detail}</small></span>{issue.view&&issue.view!=="settings"?<button className="button ghost small" onClick={()=>navigate(issue.view!)}>Открыть <ChevronRight size={14}/></button>:issue.title==="Требуется резервная копия"?<button className="button ghost small" onClick={exportBackup}>Создать копию <ChevronRight size={14}/></button>:null}</div>)}</div>:<div className="diagnostics-ok"><Check size={19}/><span><strong>Проверка пройдена</strong>Ошибок и предупреждений не найдено.</span></div>}
+              </section>
               <section className="legal-section">
                 <div className="section-heading compact"><div><span className="eyebrow">Актуально на 27.07.2026</span><h2>Правила уведомлений</h2><p>Нажмите на основание, чтобы открыть действующую редакцию.</p></div></div>
                 <div className="legal-grid">{RULES.map((rule)=><a href={rule.sourceUrl} target="_blank" rel="noreferrer" key={rule.id}><span className="rule-days">{rule.days === null ? "!" : rule.days}<small>{rule.days === null ? "срочно" : rule.workingDays ? "раб. дн." : "дней"}</small></span><span><strong>{rule.shortTitle}</strong><small>{rule.source}</small><p>{rule.help}</p></span><ChevronRight size={17}/></a>)}</div>

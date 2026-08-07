@@ -1526,6 +1526,105 @@ select:focus-visible {
   justify-content: flex-start;
 }
 
+.diagnostics-card {
+  margin-top: 18px;
+}
+
+.diagnostics-heading,
+.diagnostics-summary,
+.diagnostics-list > div,
+.diagnostics-list > div > span,
+.diagnostics-ok {
+  display: flex;
+  align-items: center;
+}
+
+.diagnostics-heading {
+  justify-content: space-between;
+  gap: 18px;
+}
+
+.diagnostics-heading .card-title {
+  margin-bottom: 0;
+}
+
+.diagnostics-summary {
+  flex-wrap: wrap;
+  gap: 10px;
+  margin: 18px 0 14px;
+}
+
+.diagnostics-summary > span {
+  border-radius: 999px;
+  background: #f2f6f8;
+  padding: 8px 12px;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.diagnostics-summary strong {
+  color: var(--text);
+}
+
+.diagnostics-list {
+  display: grid;
+  gap: 8px;
+}
+
+.diagnostics-list > div {
+  justify-content: space-between;
+  gap: 12px;
+  min-height: 48px;
+  border: 1px solid var(--border-soft);
+  border-radius: 9px;
+  padding: 8px 10px 8px 13px;
+}
+
+.diagnostics-list > div.error {
+  border-color: #fecaca;
+  background: #fff7f7;
+}
+
+.diagnostics-list > div.warning {
+  border-color: #fde2ae;
+  background: #fffbf2;
+}
+
+.diagnostics-list > div > span {
+  min-width: 0;
+  gap: 9px;
+}
+
+.diagnostics-list .error svg {
+  color: var(--danger);
+}
+
+.diagnostics-list .warning svg {
+  color: var(--warning);
+}
+
+.diagnostics-list small {
+  overflow: hidden;
+  color: var(--muted);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.diagnostics-ok {
+  gap: 10px;
+  border-radius: 9px;
+  background: var(--success-pale);
+  padding: 14px;
+  color: var(--success);
+}
+
+.diagnostics-ok span {
+  display: flex;
+  flex-direction: column;
+  color: var(--text);
+  font-size: 13px;
+}
+
 .legal-section {
   margin-top: 30px;
 }
@@ -1825,6 +1924,80 @@ select:focus-visible {
   color: var(--muted);
 }
 
+.work-plan-filters {
+  grid-template-columns: minmax(220px, 320px) minmax(220px, 320px);
+}
+
+.work-plan-summary {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 12px;
+  margin: 14px 0 20px;
+}
+
+.work-plan-summary > div {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  min-height: 76px;
+  padding: 16px 18px;
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  background: #fff;
+  box-shadow: var(--shadow);
+}
+
+.work-plan-summary span {
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.work-plan-summary strong {
+  color: var(--navy);
+  font-size: 27px;
+}
+
+.work-plan-summary .danger {
+  border-color: #fecaca;
+  background: #fff7f7;
+}
+
+.work-plan-summary .danger strong {
+  color: #b42318;
+}
+
+.work-plan-table {
+  min-width: 1120px;
+}
+
+.work-plan-table th:first-child,
+.work-plan-table td:first-child {
+  width: 120px;
+}
+
+.work-plan-document {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.work-plan-document small {
+  color: var(--muted);
+}
+
+.inline-link {
+  width: fit-content;
+  border: 0;
+  padding: 0;
+  background: transparent;
+  color: var(--teal-dark);
+  font-size: 12px;
+  font-weight: 750;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
 @media (max-width: 1280px) {
   .kpi-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -1842,6 +2015,9 @@ select:focus-visible {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
   .quick-help ol {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .work-plan-summary {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 }
@@ -1939,6 +2115,10 @@ select:focus-visible {
   .notice-filters {
     grid-template-columns: 1fr;
   }
+  .work-plan-filters,
+  .work-plan-summary {
+    grid-template-columns: 1fr;
+  }
   .search-box {
     grid-column: auto;
   }
@@ -1978,6 +2158,18 @@ select:focus-visible {
   }
   .quick-help ol {
     grid-template-columns: 1fr;
+  }
+  .diagnostics-heading,
+  .diagnostics-list > div {
+    align-items: stretch;
+    flex-direction: column;
+  }
+  .diagnostics-list > div > span {
+    flex-wrap: wrap;
+  }
+  .diagnostics-list small {
+    width: 100%;
+    white-space: normal;
   }
   .modal-backdrop {
     padding: 0;
