@@ -193,7 +193,7 @@ type Rule = {
 
 const STORAGE_KEY = "voinskiy-uchet-v1";
 const LAST_BACKUP_KEY = "voinskiy-uchet-last-backup";
-const APP_VERSION = "19.3";
+const APP_VERSION = "19.4";
 
 const RULES: Rule[] = [
   {
@@ -730,6 +730,12 @@ function xmlValue(value: unknown) {
     .replaceAll("\n", '</w:t><w:br/><w:t xml:space="preserve">');
 }
 
+function documentMaritalStatus(employee: Employee) {
+  const isMarried = /состоит в зарегистрированном браке|женат|замужем/i.test(employee.maritalStatus);
+  if (!isMarried) return employee.maritalStatus;
+  return employee.sex === "female" ? "Замужем" : "Женат";
+}
+
 function documentValues(
   employee: Employee,
   settings: OrganizationSettings,
@@ -789,7 +795,7 @@ function documentValues(
     GRADUATION_YEAR: "",
     PROFESSION: employee.profession,
     ADDITIONAL_PROFESSION: "",
-    MARITAL_STATUS: employee.maritalStatus,
+    MARITAL_STATUS: documentMaritalStatus(employee),
     WIFE_DETAILS: familyDetail(wife),
     MOTHER_DETAILS: familyDetail(mother),
     FATHER_DETAILS: familyDetail(father),
@@ -987,7 +993,7 @@ async function buildPersonnelListDocx(
       LIST_BIRTH_DETAILS: [formatDate(employee.birthDate, ""), employee.birthPlace].filter(Boolean).join(", "),
       LIST_EDUCATION: employee.education,
       LIST_ADDRESS: employee.actualAddress || employee.registrationAddress,
-      LIST_MARITAL_STATUS: employee.maritalStatus,
+      LIST_MARITAL_STATUS: documentMaritalStatus(employee),
       LIST_POSITION_DEPARTMENT: [employee.position, employee.department ? `(${employee.department})` : ""].filter(Boolean).join(" "),
     };
     let row = rowTemplate;
