@@ -193,7 +193,7 @@ type Rule = {
 
 const STORAGE_KEY = "voinskiy-uchet-v1";
 const LAST_BACKUP_KEY = "voinskiy-uchet-last-backup";
-const APP_VERSION = "19.4";
+const APP_VERSION = "19.5";
 
 const RULES: Rule[] = [
   {
@@ -733,7 +733,7 @@ function xmlValue(value: unknown) {
 function documentMaritalStatus(employee: Employee) {
   const isMarried = /состоит в зарегистрированном браке|женат|замужем/i.test(employee.maritalStatus);
   if (!isMarried) return employee.maritalStatus;
-  return employee.sex === "female" ? "Замужем" : "Женат";
+  return employee.sex === "female" ? "замужем" : "женат";
 }
 
 function documentValues(
