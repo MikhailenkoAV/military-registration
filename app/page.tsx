@@ -193,7 +193,7 @@ type Rule = {
 
 const STORAGE_KEY = "voinskiy-uchet-v1";
 const LAST_BACKUP_KEY = "voinskiy-uchet-last-backup";
-const APP_VERSION = "19.2";
+const APP_VERSION = "19.3";
 
 const RULES: Rule[] = [
   {
@@ -751,11 +751,11 @@ function documentValues(
   const father = isNotMarried
     ? family.find((item) => /^отец$/i.test(item.relation.trim()))
     : undefined;
-  const children = isDivorcedOrWidowed
+  const children = isMarried || isDivorcedOrWidowed
     ? family.filter((item) => /^(сын|дочь)$/i.test(item.relation.trim()))
     : [];
   const familyDetail = (item?: FamilyMember) => item
-    ? [item.fullName, item.birthDate ? `${item.birthDate.slice(0, 4)} г.р.` : ""].filter(Boolean).join(", ")
+    ? [item.fullName, formatDate(item.birthDate, "")].filter(Boolean).join(", ")
     : "";
   const languages = employee.languages.split(/[;,]/).map((item) => item.trim()).filter(Boolean);
   const orderDate = parseLocalDate(f2OrderDate || employee.orderDate);
