@@ -20,6 +20,10 @@ const values = {
   POSITION: "пилот-инструктор",
   HEALTH_STATUS: "здоров",
   MARITAL_STATUS: "женат",
+  WIFE_DETAILS: "Пронина Елена Сергеевна, 1971 г.р.",
+  CHILDREN_DETAILS: "",
+  MOTHER_DETAILS: "",
+  FATHER_DETAILS: "",
   REGISTRATION_ADDRESS: "г. Сочи, ул. Бамбуковая, д. 42, кв. 47",
   DEPARTMENT: "Лётная служба",
 };
