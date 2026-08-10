@@ -193,7 +193,7 @@ type Rule = {
 
 const STORAGE_KEY = "voinskiy-uchet-v1";
 const LAST_BACKUP_KEY = "voinskiy-uchet-last-backup";
-const APP_VERSION = "19.5";
+const APP_VERSION = "19.6";
 
 const RULES: Rule[] = [
   {
@@ -712,7 +712,7 @@ function serializeFamilyRows(rows: FamilyMember[]) {
 }
 
 function assetUrl(name: string) {
-  return `${process.env.NEXT_PUBLIC_BASE_PATH ?? ""}/documents/${name}`;
+  return `${process.env.NEXT_PUBLIC_BASE_PATH ?? ""}/documents/${name}?v=${encodeURIComponent(APP_VERSION)}`;
 }
 
 function bytesFromBase64(value: string) {
@@ -881,7 +881,7 @@ async function buildDocx(
       : type === "employmentNotice"
         ? "employment-notice-template.docx"
       : "message-sheet-template.docx";
-  const response = await fetch(assetUrl(templateName));
+  const response = await fetch(assetUrl(templateName), { cache: "no-store" });
   if (!response.ok) throw new Error("Не удалось загрузить шаблон Word");
   const archive = unzipSync(new Uint8Array(await response.arrayBuffer()));
   const values = documentValues(employee, settings, eventType, f2OrderNumber, f2OrderDate, headerLocation);
@@ -905,7 +905,7 @@ async function buildChangesDocx(
   settings: OrganizationSettings,
   headerLocation: DocumentHeaderLocation,
 ) {
-  const response = await fetch(assetUrl("changes-template.docx"));
+  const response = await fetch(assetUrl("changes-template.docx"), { cache: "no-store" });
   if (!response.ok) throw new Error("Не удалось загрузить шаблон Word");
   const archive = unzipSync(new Uint8Array(await response.arrayBuffer()));
   const documentPath = "word/document.xml";
@@ -961,7 +961,7 @@ async function buildPersonnelListDocx(
   const templateName = type === "officerList" ? "officer-list-template.docx" : "enlisted-list-template.docx";
   let archive: ReturnType<typeof unzipSync>;
   try {
-    const response = await fetch(assetUrl(templateName));
+    const response = await fetch(assetUrl(templateName), { cache: "no-store" });
     if (!response.ok) throw new Error(`Шаблон недоступен: ${response.status}`);
     archive = unzipSync(new Uint8Array(await response.arrayBuffer()));
   } catch {
