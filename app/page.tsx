@@ -193,7 +193,7 @@ type Rule = {
 
 const STORAGE_KEY = "voinskiy-uchet-v1";
 const LAST_BACKUP_KEY = "voinskiy-uchet-last-backup";
-const APP_VERSION = "19.7";
+const APP_VERSION = "19.8";
 
 const RULES: Rule[] = [
   {
@@ -889,7 +889,6 @@ async function buildDocx(
   const values = documentValues(employee, settings, eventType, f2OrderNumber, f2OrderDate, headerLocation);
   if (type === "f2" && headerLocation === "moscow") {
     Object.assign(values, {
-      REGISTRATION_ADDRESS: "г. Москва, ул. Заморенова, д. 12, стр. 1",
       ORG_ADDRESS: "Российская Федерация, город Москва, вн. тер. г. муниципальный округ Пресненский, наб. Пресненская, д. 12, помещ. 20/80",
       ORG_NAME: 'Акционерное общество Центр авиации "Солярис"',
       ORG_SHORT_NAME: 'Филиал АО ЦА "Солярис" (город Москва)',

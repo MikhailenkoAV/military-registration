@@ -80,11 +80,19 @@ function generate(templateName, outputName, overrides = {}) {
 }
 
 generate("form10-template.docx", "form10-corrected.docx");
-generate("f2-template.docx", "f2-moscow.docx", {
-  REGISTRATION_ADDRESS: "г. Москва, ул. Заморенова, д. 12, стр. 1",
+generate("f2-template.docx", "f2-moscow-hire.docx", {
+  REGISTRATION_ADDRESS: "г. Москва, ул. Красная Пресня, д. 15, кв. 18",
   ORG_ADDRESS: "Российская Федерация, город Москва, вн. тер. г. муниципальный округ Пресненский, наб. Пресненская, д. 12, помещ. 20/80",
   ORG_NAME: 'Акционерное общество Центр авиации "Солярис"',
   ORG_SHORT_NAME: 'Филиал АО ЦА "Солярис" (город Москва)',
+});
+generate("f2-template.docx", "f2-moscow-dismissal.docx", {
+  REGISTRATION_ADDRESS: "г. Москва, ул. Красная Пресня, д. 15, кв. 18",
+  ORG_ADDRESS: "Российская Федерация, город Москва, вн. тер. г. муниципальный округ Пресненский, наб. Пресненская, д. 12, помещ. 20/80",
+  ORG_NAME: 'Акционерное общество Центр авиации "Солярис"',
+  ORG_SHORT_NAME: 'Филиал АО ЦА "Солярис" (город Москва)',
+  HIRE_STRIKE: "1",
+  DISMISSAL_STRIKE: "0",
 });
 generate("f2-template.docx", "f2-sochi.docx", {
   HEADER_AUTHORITY_TYPE: "городского округа",

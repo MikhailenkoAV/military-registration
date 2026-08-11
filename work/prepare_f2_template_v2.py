@@ -14,12 +14,20 @@ REPLACEMENTS = {
     "(город Москва)": "{{F2_BRANCH_CITY}}",
 }
 
+EVENT_STRIKE_VALUES = {
+    "{{EVENT_HIRE}}": "{{HIRE_STRIKE}}",
+    "{{EVENT_DISMISSAL}}": "{{DISMISSAL_STRIKE}}",
+}
+
 
 def replace_paragraph_text(root: etree._Element) -> None:
     found: set[str] = set()
     for paragraph in root.xpath(".//w:p", namespaces=NS):
         nodes = paragraph.xpath(".//w:t", namespaces=NS)
         combined = "".join(node.text or "" for node in nodes).strip()
+        for original, replacement in REPLACEMENTS.items():
+            if combined == replacement:
+                found.add(original)
         replacement = REPLACEMENTS.get(combined)
         if replacement is None or not nodes:
             continue
@@ -31,6 +39,20 @@ def replace_paragraph_text(root: etree._Element) -> None:
     missing = set(REPLACEMENTS) - found
     if missing:
         raise RuntimeError(f"Не найдены строки шаблона: {sorted(missing)}")
+
+    for token, strike_value in EVENT_STRIKE_VALUES.items():
+        nodes = root.xpath(f'.//w:t[text()="{token}"]', namespaces=NS)
+        if len(nodes) != 1:
+            raise RuntimeError(f"Ожидался один маркер {token}, найдено: {len(nodes)}")
+        run = nodes[0].xpath("ancestor::w:r[1]", namespaces=NS)[0]
+        properties = run.find(f"{{{W}}}rPr")
+        if properties is None:
+            properties = etree.Element(f"{{{W}}}rPr")
+            run.insert(0, properties)
+        strike = properties.find(f"{{{W}}}strike")
+        if strike is None:
+            strike = etree.SubElement(properties, f"{{{W}}}strike")
+        strike.set(f"{{{W}}}val", strike_value)
 
     # Длинный обязательный московский адрес занимает две строки. Уменьшаем
     # только избыточный отступ перед заголовком, сохраняя шрифты и сетку формы.
