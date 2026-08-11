@@ -50,6 +50,10 @@ const values = {
   ORDER_YEAR: "26",
   DIRECTOR_POSITION: "Генеральный директор",
   DIRECTOR_NAME: "Петров П.П.",
+  HEADER_AUTHORITY_TYPE: "военного",
+  HEADER_AUTHORITY_NAME: "комиссариата города Москвы",
+  F2_BRANCH_TITLE: "ФИЛИАЛ АО ЦА «СОЛЯРИС»",
+  F2_BRANCH_CITY: "(город Москва)",
 };
 
 function xmlValue(value) {
@@ -59,13 +63,14 @@ function xmlValue(value) {
     .replaceAll(">", "&gt;");
 }
 
-function generate(templateName, outputName) {
+function generate(templateName, outputName, overrides = {}) {
   const source = path.join(root, "public/documents", templateName);
   const archive = unzipSync(new Uint8Array(fs.readFileSync(source)));
+  const documentValues = { ...values, ...overrides };
   for (const [entry, content] of Object.entries(archive)) {
     if (!entry.startsWith("word/") || !entry.endsWith(".xml")) continue;
     let xml = strFromU8(content);
-    for (const [key, value] of Object.entries(values)) {
+    for (const [key, value] of Object.entries(documentValues)) {
       xml = xml.replaceAll(`{{${key}}}`, xmlValue(value));
     }
     xml = xml.replace(/\{\{[A-Z0-9_]+\}\}/g, "");
@@ -75,4 +80,19 @@ function generate(templateName, outputName) {
 }
 
 generate("form10-template.docx", "form10-corrected.docx");
-generate("f2-template.docx", "f2-corrected.docx");
+generate("f2-template.docx", "f2-moscow.docx", {
+  REGISTRATION_ADDRESS: "г. Москва, ул. Заморенова, д. 12, стр. 1",
+  ORG_ADDRESS: "Российская Федерация, город Москва, вн. тер. г. муниципальный округ Пресненский, наб. Пресненская, д. 12, помещ. 20/80",
+  ORG_NAME: 'Акционерное общество Центр авиации "Солярис"',
+  ORG_SHORT_NAME: 'Филиал АО ЦА "Солярис" (город Москва)',
+});
+generate("f2-template.docx", "f2-sochi.docx", {
+  HEADER_AUTHORITY_TYPE: "городского округа",
+  HEADER_AUTHORITY_NAME: "город-курорт Сочи Краснодарского края",
+  F2_BRANCH_TITLE: "",
+  F2_BRANCH_CITY: "",
+  REGISTRATION_ADDRESS: "г. Сочи, ул. Бамбуковая, д. 42, кв. 47",
+  ORG_ADDRESS: "Краснодарский край, город Сочи, ул. Авиационная, д. 1",
+  ORG_NAME: "Акционерное общество Центр авиации «Солярис»",
+  ORG_SHORT_NAME: "АО ЦА «Солярис»",
+});

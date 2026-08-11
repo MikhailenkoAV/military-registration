@@ -193,7 +193,7 @@ type Rule = {
 
 const STORAGE_KEY = "voinskiy-uchet-v1";
 const LAST_BACKUP_KEY = "voinskiy-uchet-last-backup";
-const APP_VERSION = "19.6";
+const APP_VERSION = "19.7";
 
 const RULES: Rule[] = [
   {
@@ -833,7 +833,9 @@ function documentValues(
     HEADER_AUTHORITY_TYPE: headerLocation === "sochi" ? "городского округа" : "военного",
     HEADER_AUTHORITY_NAME: headerLocation === "sochi"
       ? "город-курорт Сочи Краснодарского края"
-      : "комиссариата г. Москва",
+      : "комиссариата города Москвы",
+    F2_BRANCH_TITLE: headerLocation === "moscow" ? "ФИЛИАЛ АО ЦА «СОЛЯРИС»" : "",
+    F2_BRANCH_CITY: headerLocation === "moscow" ? "(город Москва)" : "",
     MILITARY_RANK: employee.militaryRank,
     COMPOSITION_PROFILE: [employee.composition, employee.profile].filter(Boolean).join(" / "),
     TEAM_NUMBER: "",
@@ -885,6 +887,14 @@ async function buildDocx(
   if (!response.ok) throw new Error("Не удалось загрузить шаблон Word");
   const archive = unzipSync(new Uint8Array(await response.arrayBuffer()));
   const values = documentValues(employee, settings, eventType, f2OrderNumber, f2OrderDate, headerLocation);
+  if (type === "f2" && headerLocation === "moscow") {
+    Object.assign(values, {
+      REGISTRATION_ADDRESS: "г. Москва, ул. Заморенова, д. 12, стр. 1",
+      ORG_ADDRESS: "Российская Федерация, город Москва, вн. тер. г. муниципальный округ Пресненский, наб. Пресненская, д. 12, помещ. 20/80",
+      ORG_NAME: 'Акционерное общество Центр авиации "Солярис"',
+      ORG_SHORT_NAME: 'Филиал АО ЦА "Солярис" (город Москва)',
+    });
+  }
   for (const [path, content] of Object.entries(archive)) {
     if (!path.startsWith("word/") || !path.endsWith(".xml")) continue;
     let xml = strFromU8(content);
