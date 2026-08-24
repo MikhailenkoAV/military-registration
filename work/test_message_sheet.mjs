@@ -9,7 +9,7 @@ const target = path.join(outputDirectory, "message-sheet-filled.docx");
 fs.mkdirSync(outputDirectory, { recursive: true });
 
 const values = {
-  ORG_NAME: "Акционерное общество Центр авиации «Солярис»",
+  ORG_NAME: 'Филиал АО ЦА "Солярис" (город Москва)',
   LAST_NAME: "Пронин",
   FIRST_NAME: "Александр",
   MIDDLE_NAME: "Константинович",

@@ -7,8 +7,8 @@ const output = path.join(root, "work/rendered-corrections");
 fs.mkdirSync(output, { recursive: true });
 
 const values = {
-  ORG_NAME: "Акционерное общество Центр авиации «Солярис»",
-  ORG_SHORT_NAME: "АО ЦА «Солярис»",
+  ORG_NAME: 'Филиал АО ЦА "Солярис" (город Москва)',
+  ORG_SHORT_NAME: 'Филиал АО ЦА "Солярис" (город Москва)',
   ORG_ADDRESS: "г. Москва",
   LAST_NAME: "Пилипчук",
   FIRST_NAME: "Владимир",

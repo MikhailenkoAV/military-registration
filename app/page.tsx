@@ -193,7 +193,7 @@ type Rule = {
 
 const STORAGE_KEY = "voinskiy-uchet-v1";
 const LAST_BACKUP_KEY = "voinskiy-uchet-last-backup";
-const APP_VERSION = "19.8";
+const APP_VERSION = "19.9";
 
 const RULES: Rule[] = [
   {
@@ -776,8 +776,8 @@ function documentValues(
     employee.militaryDocIssuedBy,
   ].filter(Boolean).join(", ");
   return {
-    ORG_NAME: settings.organizationName,
-    ORG_SHORT_NAME: settings.shortName,
+    ORG_NAME: headerLocation === "moscow" ? 'Филиал АО ЦА "Солярис" (город Москва)' : settings.organizationName,
+    ORG_SHORT_NAME: headerLocation === "moscow" ? 'Филиал АО ЦА "Солярис" (город Москва)' : settings.shortName,
     ORG_ADDRESS: settings.organizationAddress,
     LAST_NAME: employee.lastName,
     FIRST_NAME: employee.firstName,
@@ -1812,7 +1812,7 @@ export default function HomePage() {
         type,
         createdAt: new Date().toISOString(),
         status: "formed",
-        headerLocation: (["f2", "employmentNotice", "changes", "officerList", "enlistedList"] as DocumentType[]).includes(type) ? documentHeaderLocation : undefined,
+        headerLocation: documentHeaderLocation,
         eventType: type === "f2" || type === "employmentNotice" ? f2Event : undefined,
         orderNumber: type === "f2" || type === "employmentNotice" ? f2OrderNumber : undefined,
         orderDate: type === "f2" || type === "employmentNotice" ? f2OrderDate : undefined,
@@ -2403,13 +2403,14 @@ export default function HomePage() {
                   <h3>Параметры документа</h3>
                   {!(["changes", "officerList", "enlistedList"] as DocumentType[]).includes(documentType) ? <label className="field"><span>Сотрудник</span><select value={documentEmployeeId} onChange={(e) => setDocumentEmployeeId(e.target.value)}><option value="">Выберите сотрудника</option>{employees.slice().sort((a,b)=>a.fullName.localeCompare(b.fullName,"ru")).map((employee)=><option value={employee.id} key={employee.id}>{employee.fullName}</option>)}</select></label> : null}
                   <div className="segmented document-types"><button className={documentType === "form10" ? "active" : ""} onClick={() => setDocumentType("form10")}>Форма № 10</button><button className={documentType === "f2" ? "active" : ""} onClick={() => setDocumentType("f2")}>Справка Ф-2</button><button className={documentType === "messageSheet" ? "active" : ""} onClick={() => setDocumentType("messageSheet")}>Листок сообщений</button><button className={documentType === "changes" ? "active" : ""} onClick={() => setDocumentType("changes")}>Изменение данных</button><button className={documentType === "employmentNotice" ? "active" : ""} onClick={() => setDocumentType("employmentNotice")}>Принятие / увольнение</button><button className={documentType === "officerList" ? "active" : ""} onClick={() => setDocumentType("officerList")}>Список: офицеры</button><button className={documentType === "enlistedList" ? "active" : ""} onClick={() => setDocumentType("enlistedList")}>Список: рядовые</button></div>
+                  {documentType === "form10" || documentType === "messageSheet" ? <label className="field"><span>Место работы</span><select value={documentHeaderLocation} onChange={(event) => setDocumentHeaderLocation(event.target.value as DocumentHeaderLocation)}><option value="moscow">Москва</option><option value="sochi">Сочи</option></select></label> : null}
                   {documentType === "changes" ? <div className="change-document-options">
-                    <label className="field"><span>Шапка документа</span><select value={documentHeaderLocation} onChange={(event) => setDocumentHeaderLocation(event.target.value as DocumentHeaderLocation)}><option value="moscow">Москва</option><option value="sochi">Сочи</option></select></label>
+                    <label className="field"><span>Место работы</span><select value={documentHeaderLocation} onChange={(event) => setDocumentHeaderLocation(event.target.value as DocumentHeaderLocation)}><option value="moscow">Москва</option><option value="sochi">Сочи</option></select></label>
                     <div className="change-employee-add"><label className="field"><span>Добавить сотрудника</span><select value={changeEmployeeToAdd} onChange={(event)=>setChangeEmployeeToAdd(event.target.value)}><option value="">Выберите сотрудника</option>{employees.filter((employee)=>!changeDocumentEntries.some((entry)=>entry.employeeId===employee.id)).slice().sort((a,b)=>a.fullName.localeCompare(b.fullName,"ru")).map((employee)=><option value={employee.id} key={employee.id}>{employee.fullName}</option>)}</select></label><button type="button" className="button secondary" disabled={!changeEmployeeToAdd} onClick={()=>{setChangeDocumentEntries([...changeDocumentEntries,{employeeId:changeEmployeeToAdd,content:""}]);setChangeEmployeeToAdd("");}}><Plus size={16}/> Добавить</button></div>
                     <div className="change-entry-list">{changeDocumentEntries.map((entry)=>{const employee=employees.find((item)=>item.id===entry.employeeId);return <div className="change-entry" key={entry.employeeId}><div><strong>{employee?.fullName}</strong><button type="button" className="icon-button" aria-label="Удалить сотрудника из документа" onClick={()=>setChangeDocumentEntries(changeDocumentEntries.filter((item)=>item.employeeId!==entry.employeeId))}><Trash2 size={16}/></button></div>{documentType === "changes" ? <label className="field"><span>Содержание изменений</span><textarea value={entry.content} placeholder="Например: изменение места пребывания…" onChange={(event)=>setChangeDocumentEntries(changeDocumentEntries.map((item)=>item.employeeId===entry.employeeId?{...item,content:event.target.value}:item))}/></label> : null}</div>})}</div>
                   </div> : null}
                   {documentType === "officerList" || documentType === "enlistedList" ? <div className="change-document-options">
-                    <label className="field"><span>Шапка документа</span><select value={documentHeaderLocation} onChange={(event) => setDocumentHeaderLocation(event.target.value as DocumentHeaderLocation)}><option value="moscow">Москва</option><option value="sochi">Сочи</option></select></label>
+                    <label className="field"><span>Место работы</span><select value={documentHeaderLocation} onChange={(event) => setDocumentHeaderLocation(event.target.value as DocumentHeaderLocation)}><option value="moscow">Москва</option><option value="sochi">Сочи</option></select></label>
                     <div className="inline-success"><Check size={18}/><span><strong>Список сформирован автоматически</strong>Включены только действующие сотрудники с соответствующими воинскими званиями: {automaticListEntries.length}.</span></div>
                     <div className="document-check-summary"><strong>По званиям</strong><div>{Object.entries(listRankDistribution).map(([rank, count]) => <span className="status completed" key={rank}>{rank}: {count}</span>)}</div></div>
                     {listEmployeesWithGaps.length ? <div className="inline-warning"><AlertCircle size={18}/><span><strong>Незаполненные графы: {listEmployeesWithGaps.length} сотрудник(а)</strong>{listEmployeesWithGaps.slice(0, 4).map(({employee, check}) => `${employee.fullName}: ${check.critical.join(", ")}`).join("; ")}{listEmployeesWithGaps.length > 4 ? ` и ещё ${listEmployeesWithGaps.length - 4}` : ""}.</span></div> : null}
@@ -2417,7 +2418,7 @@ export default function HomePage() {
                     <div className="change-entry-list">{automaticListEntries.map((entry)=>{const employee=employees.find((item)=>item.id===entry.employeeId);return <div className="change-entry" key={entry.employeeId}><div><strong>{employee?.fullName}</strong><span>{employee?.militaryRank}</span></div></div>})}</div>
                   </div> : null}
                   {documentType === "f2" || documentType === "employmentNotice" ? <div className="f2-options">
-                    <label className="field"><span>Шапка документа</span><select value={documentHeaderLocation} onChange={(event) => setDocumentHeaderLocation(event.target.value as DocumentHeaderLocation)}><option value="moscow">Москва</option><option value="sochi">Сочи</option></select></label>
+                    <label className="field"><span>Место работы</span><select value={documentHeaderLocation} onChange={(event) => setDocumentHeaderLocation(event.target.value as DocumentHeaderLocation)}><option value="moscow">Москва</option><option value="sochi">Сочи</option></select></label>
                     <fieldset className="event-checklist"><legend>Отметка в справке</legend>
                       <label><input type="radio" name="f2-event" checked={f2Event==="hire"} onChange={()=>setF2Event("hire")}/><span>Принят (поступил) на работу</span></label>
                       <label><input type="radio" name="f2-event" checked={f2Event==="dismissal"} onChange={()=>setF2Event("dismissal")}/><span>Уволен с работы (отчислен из образовательной организации)</span></label>
@@ -2444,7 +2445,7 @@ export default function HomePage() {
                   </div>
                   <div className="preview-data">
                     <h4>Проверка перед выгрузкой</h4>
-                    {(documentType === "f2" || documentType === "employmentNotice" || documentType === "changes" || documentType === "officerList" || documentType === "enlistedList") ? <div><span>Шапка</span><strong>{documentHeaderLocation === "moscow" ? "Москва" : "Сочи"}</strong></div> : null}
+                    <div><span>Место работы</span><strong>{documentHeaderLocation === "moscow" ? "Москва" : "Сочи"}</strong></div>
                     {selectedDocumentEmployee && !(["changes", "officerList", "enlistedList"] as DocumentType[]).includes(documentType) ? <>
                       <div><span>Сотрудник</span><strong>{selectedDocumentEmployee.fullName}</strong></div>
                       <div><span>Звание / ВУС</span><strong>{selectedDocumentEmployee.militaryRank || "—"} / {selectedDocumentEmployee.vus || "—"}</strong></div>
