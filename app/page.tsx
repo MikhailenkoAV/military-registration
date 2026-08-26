@@ -83,9 +83,14 @@ type Employee = {
   snils: string;
   inn: string;
   education: string;
+  educationDocumentNumber: string;
+  educationGraduationYear: string;
   profession: string;
   languages: string;
   driverLicense: string;
+  driverLicenseSeries: string;
+  driverLicenseNumber: string;
+  driverLicenseIssueDate: string;
   maritalStatus: string;
   familyMembers: string;
   militaryDocType: string;
@@ -193,7 +198,8 @@ type Rule = {
 
 const STORAGE_KEY = "voinskiy-uchet-v1";
 const LAST_BACKUP_KEY = "voinskiy-uchet-last-backup";
-const APP_VERSION = "19.9";
+const APP_VERSION = "20.0";
+const MOSCOW_WORKPLACE = "Акционерное общество Центр авиации «Солярис» Филиал АО ЦА «Солярис» (город Москва)";
 
 const RULES: Rule[] = [
   {
@@ -362,8 +368,10 @@ const employeeHistoryFields: { key: keyof Employee; label: string }[] = [
   { key: "passportIssuedBy", label: "кем выдан паспорт" }, { key: "registrationAddress", label: "адрес регистрации" },
   { key: "registrationDate", label: "дата регистрации" }, { key: "actualAddress", label: "фактический адрес" },
   { key: "phone", label: "телефон" }, { key: "snils", label: "СНИЛС" }, { key: "inn", label: "ИНН" },
-  { key: "education", label: "образование" }, { key: "profession", label: "профессия" },
-  { key: "languages", label: "иностранные языки" }, { key: "driverLicense", label: "водительское удостоверение" },
+  { key: "education", label: "образование" }, { key: "educationDocumentNumber", label: "номер документа об образовании" },
+  { key: "educationGraduationYear", label: "год окончания" }, { key: "profession", label: "профессия" },
+  { key: "languages", label: "иностранные языки" }, { key: "driverLicenseSeries", label: "серия водительского удостоверения" },
+  { key: "driverLicenseNumber", label: "номер водительского удостоверения" }, { key: "driverLicenseIssueDate", label: "дата выдачи водительского удостоверения" },
   { key: "maritalStatus", label: "семейное положение" }, { key: "familyMembers", label: "состав семьи" },
   { key: "militaryDocType", label: "вид документа воинского учёта" }, { key: "militaryDocNumber", label: "номер документа воинского учёта" },
   { key: "militaryDocIssueDate", label: "дата выдачи документа воинского учёта" }, { key: "militaryDocIssuedBy", label: "кем выдан документ воинского учёта" },
@@ -484,9 +492,14 @@ function emptyEmployee(settings: OrganizationSettings): Employee {
     snils: "",
     inn: "",
     education: "",
+    educationDocumentNumber: "",
+    educationGraduationYear: "",
     profession: "",
     languages: "",
     driverLicense: "",
+    driverLicenseSeries: "",
+    driverLicenseNumber: "",
+    driverLicenseIssueDate: "",
     maritalStatus: "",
     familyMembers: "",
     militaryDocType: "Военный билет",
@@ -508,6 +521,20 @@ function emptyEmployee(settings: OrganizationSettings): Employee {
     lastEmployeeVerification: "",
     lastCommissariatVerification: "",
     notes: "",
+  };
+}
+
+function normalizeEmployee(value: Partial<Employee>, settings: OrganizationSettings): Employee {
+  const blank = emptyEmployee(settings);
+  return {
+    ...blank,
+    ...value,
+    id: value.id || blank.id,
+    educationDocumentNumber: value.educationDocumentNumber ?? "",
+    educationGraduationYear: value.educationGraduationYear ?? "",
+    driverLicenseSeries: value.driverLicenseSeries ?? "",
+    driverLicenseNumber: value.driverLicenseNumber || value.driverLicense || "",
+    driverLicenseIssueDate: value.driverLicenseIssueDate ?? "",
   };
 }
 
@@ -722,6 +749,7 @@ function bytesFromBase64(value: string) {
 
 function xmlValue(value: unknown) {
   return String(value ?? "")
+    .replace(/"([^"]*)"/g, "«$1»")
     .replaceAll("&", "&amp;")
     .replaceAll("<", "&lt;")
     .replaceAll(">", "&gt;")
@@ -730,10 +758,21 @@ function xmlValue(value: unknown) {
     .replaceAll("\n", '</w:t><w:br/><w:t xml:space="preserve">');
 }
 
+type MaritalStatusKind = "married" | "single" | "divorcedOrWidowed" | "unknown";
+
+function maritalStatusKind(value: string): MaritalStatusKind {
+  const normalized = value.trim().toLowerCase().replaceAll("ё", "е");
+  if (/не состоит в браке|не замужем|не женат|холост/.test(normalized)) return "single";
+  if (/состоит в зарегистрированном браке|женат|замужем/.test(normalized)) return "married";
+  if (/развед|вдов/.test(normalized)) return "divorcedOrWidowed";
+  return "unknown";
+}
+
 function documentMaritalStatus(employee: Employee) {
-  const isMarried = /состоит в зарегистрированном браке|женат|замужем/i.test(employee.maritalStatus);
-  if (!isMarried) return employee.maritalStatus;
-  return employee.sex === "female" ? "замужем" : "женат";
+  const kind = maritalStatusKind(employee.maritalStatus);
+  if (kind === "married") return employee.sex === "female" ? "замужем" : "женат";
+  if (kind === "single") return employee.sex === "female" ? "не замужем" : "холост";
+  return employee.maritalStatus;
 }
 
 function documentValues(
@@ -745,9 +784,10 @@ function documentValues(
   headerLocation: DocumentHeaderLocation,
 ) {
   const family = familyRows(employee.familyMembers);
-  const isMarried = /состоит в зарегистрированном браке|женат|замужем/i.test(employee.maritalStatus);
-  const isNotMarried = /не состоит в браке|не замужем|не женат/i.test(employee.maritalStatus);
-  const isDivorcedOrWidowed = /развед|вдов/i.test(employee.maritalStatus);
+  const maritalKind = maritalStatusKind(employee.maritalStatus);
+  const isMarried = maritalKind === "married";
+  const isNotMarried = maritalKind === "single";
+  const isDivorcedOrWidowed = maritalKind === "divorcedOrWidowed";
   const wife = isMarried
     ? family.find((item) => /^(жена|супруга)$/i.test(item.relation.trim()))
     : undefined;
@@ -763,6 +803,12 @@ function documentValues(
   const familyDetail = (item?: FamilyMember) => item
     ? [item.fullName, formatDate(item.birthDate, "")].filter(Boolean).join(", ")
     : "";
+  const familyDetailWithRelation = (item?: FamilyMember) => {
+    if (!item) return "";
+    const relation = item.relation.trim();
+    const label = relation ? `${relation.charAt(0).toUpperCase()}${relation.slice(1).toLowerCase()}` : "";
+    return [label ? `${label}:` : "", familyDetail(item)].filter(Boolean).join(" ");
+  };
   const languages = employee.languages.split(/[;,]/).map((item) => item.trim()).filter(Boolean);
   const orderDate = parseLocalDate(f2OrderDate || employee.orderDate);
   const monthNames = [
@@ -776,8 +822,8 @@ function documentValues(
     employee.militaryDocIssuedBy,
   ].filter(Boolean).join(", ");
   return {
-    ORG_NAME: headerLocation === "moscow" ? 'Филиал АО ЦА "Солярис" (город Москва)' : settings.organizationName,
-    ORG_SHORT_NAME: headerLocation === "moscow" ? 'Филиал АО ЦА "Солярис" (город Москва)' : settings.shortName,
+    ORG_NAME: headerLocation === "moscow" ? MOSCOW_WORKPLACE : settings.organizationName,
+    ORG_SHORT_NAME: headerLocation === "moscow" ? MOSCOW_WORKPLACE : settings.shortName,
     ORG_ADDRESS: settings.organizationAddress,
     LAST_NAME: employee.lastName,
     FIRST_NAME: employee.firstName,
@@ -791,15 +837,15 @@ function documentValues(
     EDUCATION_ORG: "",
     QUALIFICATION: "",
     SPECIALITY: "",
-    DIPLOMA: "",
-    GRADUATION_YEAR: "",
+    DIPLOMA: employee.educationDocumentNumber,
+    GRADUATION_YEAR: employee.educationGraduationYear,
     PROFESSION: employee.profession,
     ADDITIONAL_PROFESSION: "",
     MARITAL_STATUS: documentMaritalStatus(employee),
-    WIFE_DETAILS: familyDetail(wife),
-    MOTHER_DETAILS: familyDetail(mother),
-    FATHER_DETAILS: familyDetail(father),
-    CHILDREN_DETAILS: children.map((item) => `${item.relation}: ${familyDetail(item)}`).join("; "),
+    WIFE_DETAILS: familyDetailWithRelation(wife),
+    MOTHER_DETAILS: familyDetailWithRelation(mother),
+    FATHER_DETAILS: familyDetailWithRelation(father),
+    CHILDREN_DETAILS: children.map(familyDetailWithRelation).join("; "),
     FAMILY_REL_1: family[0]?.relation ?? "",
     FAMILY_PERSON_1: family[0] ? [family[0].fullName, formatDate(family[0].birthDate, "")].filter(Boolean).join(", ") : "",
     FAMILY_REL_2: family[1]?.relation ?? "",
@@ -817,10 +863,10 @@ function documentValues(
     PASSPORT: `${employee.passportSeries} ${employee.passportNumber}`.trim(),
     PASSPORT_ISSUE_DATE: formatDate(employee.passportIssueDate, ""),
     PASSPORT_ISSUED_BY: employee.passportIssuedBy,
-    DRIVER_SERIES: "",
-    DRIVER_NUMBER: employee.driverLicense,
+    DRIVER_SERIES: employee.driverLicenseSeries,
+    DRIVER_NUMBER: employee.driverLicenseNumber || employee.driverLicense,
     DRIVER_CATEGORIES: "",
-    DRIVER_ISSUE_DATE: "",
+    DRIVER_ISSUE_DATE: formatDate(employee.driverLicenseIssueDate, ""),
     REGISTRATION_ADDRESS: employee.registrationAddress,
     REGISTRATION_DATE: formatDate(employee.registrationDate, ""),
     ACTUAL_ADDRESS: employee.actualAddress,
@@ -890,8 +936,8 @@ async function buildDocx(
   if (type === "f2" && headerLocation === "moscow") {
     Object.assign(values, {
       ORG_ADDRESS: "Российская Федерация, город Москва, вн. тер. г. муниципальный округ Пресненский, наб. Пресненская, д. 12, помещ. 20/80",
-      ORG_NAME: 'Акционерное общество Центр авиации "Солярис"',
-      ORG_SHORT_NAME: 'Филиал АО ЦА "Солярис" (город Москва)',
+      ORG_NAME: "Акционерное общество Центр авиации «Солярис»",
+      ORG_SHORT_NAME: "Филиал АО ЦА «Солярис» (город Москва)",
     });
   }
   for (const [path, content] of Object.entries(archive)) {
@@ -1187,11 +1233,12 @@ export default function HomePage() {
       const raw = localStorage.getItem(STORAGE_KEY);
       if (raw) {
         const stored = JSON.parse(raw) as Partial<StoredState>;
-        setEmployees(Array.isArray(stored.employees) ? stored.employees : []);
+        const storedSettings = { ...emptySettings, ...(stored.settings ?? {}) };
+        setEmployees(Array.isArray(stored.employees) ? stored.employees.map((employee) => normalizeEmployee(employee, storedSettings)) : []);
         setNotices(Array.isArray(stored.notices) ? stored.notices : []);
         setDocuments(Array.isArray(stored.documents) ? stored.documents : []);
         setEmployeeChanges(Array.isArray(stored.employeeChanges) ? stored.employeeChanges : []);
-        setOrganization({ ...emptySettings, ...(stored.settings ?? {}) });
+        setOrganization(storedSettings);
       }
       setLastBackupAt(localStorage.getItem(LAST_BACKUP_KEY) ?? "");
     } catch {
@@ -1452,6 +1499,8 @@ export default function HomePage() {
     const trackedChanges: { key: keyof Employee; label: string }[] = [
       { key: "maritalStatus", label: "семейное положение" },
       { key: "education", label: "образование" },
+      { key: "educationDocumentNumber", label: "номер документа об образовании" },
+      { key: "educationGraduationYear", label: "год окончания" },
       { key: "department", label: "подразделение" },
       { key: "position", label: "должность" },
       { key: "registrationAddress", label: "адрес регистрации" },
@@ -1576,6 +1625,7 @@ export default function HomePage() {
     const passport = cleanCell(rowValue(row, "паспорт"));
     const passportMatch = passport.match(/(\d{4})\s+(\d{6})/);
     const militaryDoc = cleanCell(rowValue(row, "военный билет"));
+    const legacyDriverLicense = cleanCell(rowValue(row, "водительское удостоверение", "водительские права"));
     return {
       ...emptyEmployee(organization),
       ...name,
@@ -1607,6 +1657,12 @@ export default function HomePage() {
       militaryCommissariatAddress: cleanCell(rowValue(row, "адрес вк")),
       inn: cleanCell(rowValue(row, "инн")),
       snils: cleanCell(rowValue(row, "снилс")),
+      education: cleanCell(rowValue(row, "образование")),
+      educationDocumentNumber: cleanCell(rowValue(row, "номер диплома", "номер документа об образовании")),
+      educationGraduationYear: cleanCell(rowValue(row, "год окончания")),
+      driverLicenseSeries: cleanCell(rowValue(row, "серия водительского")),
+      driverLicenseNumber: cleanCell(rowValue(row, "номер водительского")) || legacyDriverLicense,
+      driverLicenseIssueDate: excelDateToIso(rowValue(row, "дата выдачи водительского")),
       maritalStatus: cleanCell(rowValue(row, "семейное")),
       familyMembers: cleanCell(rowValue(row, "дети", "состав семьи")),
     } satisfies Employee;
@@ -2093,11 +2149,12 @@ export default function HomePage() {
       const data = JSON.parse(await file.text()) as StoredState;
       if (!Array.isArray(data.employees) || !Array.isArray(data.notices)) throw new Error();
       if (!window.confirm("Заменить текущие данные содержимым резервной копии?")) return;
-      setEmployees(data.employees);
+      const restoredSettings = { ...emptySettings, ...(data.settings ?? {}) };
+      setEmployees(data.employees.map((employee) => normalizeEmployee(employee, restoredSettings)));
       setNotices(data.notices);
       setDocuments(Array.isArray(data.documents) ? data.documents : []);
       setEmployeeChanges(Array.isArray(data.employeeChanges) ? data.employeeChanges : []);
-      setOrganization({ ...emptySettings, ...(data.settings ?? {}) });
+      setOrganization(restoredSettings);
       const restoredAt = new Date().toISOString();
       localStorage.setItem(LAST_BACKUP_KEY, restoredAt);
       setLastBackupAt(restoredAt);
@@ -2600,9 +2657,13 @@ export default function HomePage() {
               </div></fieldset>
               <fieldset><legend>Образование и семья</legend><div className="form-grid three-col">
                 <Field label="Образование" value={employeeModal.education} onChange={(value)=>setEmployeeModal({...employeeModal,education:value})}/>
+                <Field label="Номер документа об образовании (диплома)" value={employeeModal.educationDocumentNumber ?? ""} onChange={(value)=>setEmployeeModal({...employeeModal,educationDocumentNumber:value})}/>
+                <Field label="Год окончания" value={employeeModal.educationGraduationYear ?? ""} onChange={(value)=>setEmployeeModal({...employeeModal,educationGraduationYear:value})}/>
                 <Field label="Профессия" value={employeeModal.profession} onChange={(value)=>setEmployeeModal({...employeeModal,profession:value})}/>
                 <Field label="Иностранные языки" value={employeeModal.languages} onChange={(value)=>setEmployeeModal({...employeeModal,languages:value})}/>
-                <Field label="Водительское удостоверение" value={employeeModal.driverLicense} onChange={(value)=>setEmployeeModal({...employeeModal,driverLicense:value})}/>
+                <Field label="Серия водительского удостоверения" value={employeeModal.driverLicenseSeries ?? ""} onChange={(value)=>setEmployeeModal({...employeeModal,driverLicenseSeries:value})}/>
+                <Field label="Номер водительского удостоверения" value={employeeModal.driverLicenseNumber ?? employeeModal.driverLicense ?? ""} onChange={(value)=>setEmployeeModal({...employeeModal,driverLicenseNumber:value})}/>
+                <Field type="date" label="Дата выдачи водительского удостоверения" value={employeeModal.driverLicenseIssueDate ?? ""} onChange={(value)=>setEmployeeModal({...employeeModal,driverLicenseIssueDate:value})}/>
                 <label className="field"><span>Семейное положение</span><select value={employeeModal.maritalStatus} onChange={(event)=>setEmployeeModal({...employeeModal,maritalStatus:event.target.value})}><option value="">Не указано</option><option>Не состоит в браке (не замужем / не женат)</option><option>Состоит в зарегистрированном браке (женат / замужем)</option><option>Разведён (разведена)</option><option>Вдовец (вдова)</option></select></label>
               </div><FamilyMembersEditor value={employeeModal.familyMembers} onChange={(value)=>setEmployeeModal({...employeeModal,familyMembers:value})}/></fieldset>
               <fieldset><legend>Воинский учёт</legend><div className="form-grid three-col">
