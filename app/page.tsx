@@ -198,7 +198,7 @@ type Rule = {
 
 const STORAGE_KEY = "voinskiy-uchet-v1";
 const LAST_BACKUP_KEY = "voinskiy-uchet-last-backup";
-const APP_VERSION = "20.0";
+const APP_VERSION = "20.1";
 const MOSCOW_WORKPLACE = "Акционерное общество Центр авиации «Солярис» Филиал АО ЦА «Солярис» (город Москва)";
 
 const RULES: Rule[] = [
@@ -791,15 +791,17 @@ function documentValues(
   const wife = isMarried
     ? family.find((item) => /^(жена|супруга)$/i.test(item.relation.trim()))
     : undefined;
-  const mother = isNotMarried
-    ? family.find((item) => /^мать$/i.test(item.relation.trim()))
-    : undefined;
-  const father = isNotMarried
-    ? family.find((item) => /^отец$/i.test(item.relation.trim()))
-    : undefined;
   const children = isMarried || isDivorcedOrWidowed
     ? family.filter((item) => /^(сын|дочь)$/i.test(item.relation.trim()))
     : [];
+  // При разводе или вдовстве без детей указываем родителей из личного дела.
+  const showParents = isNotMarried || (isDivorcedOrWidowed && children.length === 0);
+  const mother = showParents
+    ? family.find((item) => /^мать$/i.test(item.relation.trim()))
+    : undefined;
+  const father = showParents
+    ? family.find((item) => /^отец$/i.test(item.relation.trim()))
+    : undefined;
   const familyDetail = (item?: FamilyMember) => item
     ? [item.fullName, formatDate(item.birthDate, "")].filter(Boolean).join(", ")
     : "";
