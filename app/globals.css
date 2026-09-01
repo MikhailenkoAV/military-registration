@@ -1397,6 +1397,57 @@ select:focus-visible {
   gap: 18px;
 }
 
+.organization-settings-panel {
+  margin-bottom: 18px;
+}
+
+.organization-profiles {
+  display: grid;
+  gap: 16px;
+}
+
+.organization-profile-card {
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: #f8fafb;
+  padding: 18px;
+}
+
+.organization-profile-heading {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  margin-bottom: 16px;
+}
+
+.organization-profile-heading > span {
+  display: grid;
+  width: 30px;
+  height: 30px;
+  flex: 0 0 30px;
+  place-items: center;
+  border-radius: 50%;
+  background: var(--teal-pale);
+  color: var(--teal-dark);
+  font-size: 13px;
+  font-weight: 800;
+}
+
+.organization-profile-heading h4,
+.organization-profile-heading p {
+  margin: 0;
+}
+
+.organization-profile-heading h4 {
+  font-size: 15px;
+}
+
+.organization-profile-heading p {
+  margin-top: 4px;
+  color: var(--muted);
+  font-size: 12px;
+}
+
 .card-title {
   display: flex;
   align-items: center;

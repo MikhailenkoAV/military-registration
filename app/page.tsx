@@ -47,7 +47,8 @@ type View =
   | "settings";
 
 type DocumentType = "form10" | "f2" | "messageSheet" | "changes" | "employmentNotice" | "officerList" | "enlistedList";
-type DocumentHeaderLocation = "moscow" | "sochi";
+type OrganizationProfileId = "solar_sochi" | "solar_moscow" | "airline_solaris";
+type LegacyDocumentHeaderLocation = "moscow" | "sochi";
 
 type ChangeDocumentEntry = {
   employeeId: string;
@@ -134,7 +135,8 @@ type DocumentRecord = {
   createdAt: string;
   title: string;
   status?: "formed" | "signed" | "sent";
-  headerLocation?: DocumentHeaderLocation;
+  organizationProfile?: OrganizationProfileId;
+  headerLocation?: LegacyDocumentHeaderLocation;
   eventType?: "hire" | "dismissal";
   orderNumber?: string;
   orderDate?: string;
@@ -162,10 +164,15 @@ type EmployeeChangeRecord = {
   undoneAt?: string;
 };
 
-type OrganizationSettings = {
+type OrganizationProfile = {
+  workplaceName: string;
   organizationName: string;
   shortName: string;
   organizationAddress: string;
+  headerAuthorityType: string;
+  headerAuthorityName: string;
+  f2BranchTitle: string;
+  f2BranchCity: string;
   directorPosition: string;
   directorName: string;
   responsiblePosition: string;
@@ -173,6 +180,10 @@ type OrganizationSettings = {
   responsiblePhone: string;
   defaultCommissariat: string;
   defaultCommissariatAddress: string;
+};
+
+type OrganizationSettings = {
+  profiles: Record<OrganizationProfileId, OrganizationProfile>;
   extraHolidays: string;
 };
 
@@ -198,8 +209,13 @@ type Rule = {
 
 const STORAGE_KEY = "voinskiy-uchet-v1";
 const LAST_BACKUP_KEY = "voinskiy-uchet-last-backup";
-const APP_VERSION = "20.0";
-const MOSCOW_WORKPLACE = "Акционерное общество Центр авиации «Солярис» Филиал АО ЦА «Солярис» (город Москва)";
+const APP_VERSION = "21.0";
+
+const ORGANIZATION_PROFILE_LABELS: Record<OrganizationProfileId, string> = {
+  solar_sochi: "АО ЦА «Солярис» — Сочи",
+  solar_moscow: "АО ЦА «Солярис» — Москва",
+  airline_solaris: "АО Авиакомпания «Солярис»",
+};
 
 const RULES: Rule[] = [
   {
@@ -317,19 +333,103 @@ const RULES: Rule[] = [
   },
 ];
 
-const emptySettings: OrganizationSettings = {
-  organizationName: "",
-  shortName: "",
-  organizationAddress: "",
-  directorPosition: "Генеральный директор",
-  directorName: "",
-  responsiblePosition: "Специалист по ведению воинского учёта",
-  responsibleName: "Михайленко А.В.",
-  responsiblePhone: "",
-  defaultCommissariat: "",
-  defaultCommissariatAddress: "",
-  extraHolidays: "",
-};
+function emptyOrganizationProfile(overrides: Partial<OrganizationProfile> = {}): OrganizationProfile {
+  return {
+    workplaceName: "",
+    organizationName: "",
+    shortName: "",
+    organizationAddress: "",
+    headerAuthorityType: "",
+    headerAuthorityName: "",
+    f2BranchTitle: "",
+    f2BranchCity: "",
+    directorPosition: "Генеральный директор",
+    directorName: "",
+    responsiblePosition: "Специалист по ведению воинского учёта",
+    responsibleName: "Михайленко А.В.",
+    responsiblePhone: "",
+    defaultCommissariat: "",
+    defaultCommissariatAddress: "",
+    ...overrides,
+  };
+}
+
+function defaultSettings(): OrganizationSettings {
+  return {
+    profiles: {
+      solar_sochi: emptyOrganizationProfile({
+        workplaceName: "Акционерное общество Центр авиации «Солярис»",
+        organizationName: "Акционерное общество Центр авиации «Солярис»",
+        shortName: "АО ЦА «Солярис»",
+        headerAuthorityType: "городского округа",
+        headerAuthorityName: "город-курорт Сочи Краснодарского края",
+      }),
+      solar_moscow: emptyOrganizationProfile({
+        workplaceName: "Акционерное общество Центр авиации «Солярис» Филиал АО ЦА «Солярис» (город Москва)",
+        organizationName: "Акционерное общество Центр авиации «Солярис»",
+        shortName: "Филиал АО ЦА «Солярис» (город Москва)",
+        organizationAddress: "Российская Федерация, город Москва, вн. тер. г. муниципальный округ Пресненский, наб. Пресненская, д. 12, помещ. 20/80",
+        headerAuthorityType: "военного",
+        headerAuthorityName: "комиссариата города Москвы",
+        f2BranchTitle: "ФИЛИАЛ АО ЦА «СОЛЯРИС»",
+        f2BranchCity: "(город Москва)",
+      }),
+      airline_solaris: emptyOrganizationProfile({
+        workplaceName: "АО Авиакомпания «Солярис»",
+        organizationName: "АО Авиакомпания «Солярис»",
+        shortName: "АО Авиакомпания «Солярис»",
+      }),
+    },
+    extraHolidays: "",
+  };
+}
+
+type LegacyOrganizationSettings = Partial<OrganizationProfile> & { extraHolidays?: string };
+
+function normalizeOrganizationSettings(value?: Partial<OrganizationSettings> | LegacyOrganizationSettings): OrganizationSettings {
+  const defaults = defaultSettings();
+  const source = value ?? {};
+  if ("profiles" in source && source.profiles) {
+    return {
+      profiles: {
+        solar_sochi: { ...defaults.profiles.solar_sochi, ...source.profiles.solar_sochi },
+        solar_moscow: { ...defaults.profiles.solar_moscow, ...source.profiles.solar_moscow },
+        airline_solaris: { ...defaults.profiles.airline_solaris, ...source.profiles.airline_solaris },
+      },
+      extraHolidays: source.extraHolidays ?? "",
+    };
+  }
+  const legacy = source as LegacyOrganizationSettings;
+  const legacyProfile: Partial<OrganizationProfile> = {
+    workplaceName: legacy.workplaceName || legacy.organizationName,
+    organizationName: legacy.organizationName,
+    shortName: legacy.shortName,
+    organizationAddress: legacy.organizationAddress,
+    directorPosition: legacy.directorPosition,
+    directorName: legacy.directorName,
+    responsiblePosition: legacy.responsiblePosition,
+    responsibleName: legacy.responsibleName,
+    responsiblePhone: legacy.responsiblePhone,
+    defaultCommissariat: legacy.defaultCommissariat,
+    defaultCommissariatAddress: legacy.defaultCommissariatAddress,
+  };
+  const definedLegacyProfile = Object.fromEntries(
+    Object.entries(legacyProfile).filter(([, item]) => item !== undefined),
+  ) as Partial<OrganizationProfile>;
+  return {
+    profiles: {
+      ...defaults.profiles,
+      solar_sochi: { ...defaults.profiles.solar_sochi, ...definedLegacyProfile },
+    },
+    extraHolidays: legacy.extraHolidays ?? "",
+  };
+}
+
+function normalizeOrganizationProfileId(value?: string): OrganizationProfileId {
+  if (value === "solar_moscow" || value === "airline_solaris") return value;
+  if (value === "moscow") return "solar_moscow";
+  return "solar_sochi";
+}
 
 const navItems: { id: View; label: string; icon: typeof Home }[] = [
   { id: "dashboard", label: "Главная", icon: Home },
@@ -462,7 +562,7 @@ function todayIso() {
   ).padStart(2, "0")}`;
 }
 
-function emptyEmployee(settings: OrganizationSettings): Employee {
+function emptyEmployee(): Employee {
   return {
     id: makeId(),
     fullName: "",
@@ -513,8 +613,8 @@ function emptyEmployee(settings: OrganizationSettings): Employee {
     reserveCategory: "",
     fitnessCategory: "",
     healthStatus: "",
-    militaryCommissariat: settings.defaultCommissariat,
-    militaryCommissariatAddress: settings.defaultCommissariatAddress,
+    militaryCommissariat: "",
+    militaryCommissariatAddress: "",
     accountType: "",
     teamNumber: "",
     specialAccountNumber: "",
@@ -524,8 +624,8 @@ function emptyEmployee(settings: OrganizationSettings): Employee {
   };
 }
 
-function normalizeEmployee(value: Partial<Employee>, settings: OrganizationSettings): Employee {
-  const blank = emptyEmployee(settings);
+function normalizeEmployee(value: Partial<Employee>): Employee {
+  const blank = emptyEmployee();
   return {
     ...blank,
     ...value,
@@ -781,8 +881,9 @@ function documentValues(
   eventType: "hire" | "dismissal",
   f2OrderNumber: string,
   f2OrderDate: string,
-  headerLocation: DocumentHeaderLocation,
+  organizationProfileId: OrganizationProfileId,
 ) {
+  const organizationProfile = settings.profiles[organizationProfileId];
   const family = familyRows(employee.familyMembers);
   const maritalKind = maritalStatusKind(employee.maritalStatus);
   const isMarried = maritalKind === "married";
@@ -791,15 +892,17 @@ function documentValues(
   const wife = isMarried
     ? family.find((item) => /^(жена|супруга)$/i.test(item.relation.trim()))
     : undefined;
-  const mother = isNotMarried
-    ? family.find((item) => /^мать$/i.test(item.relation.trim()))
-    : undefined;
-  const father = isNotMarried
-    ? family.find((item) => /^отец$/i.test(item.relation.trim()))
-    : undefined;
   const children = isMarried || isDivorcedOrWidowed
     ? family.filter((item) => /^(сын|дочь)$/i.test(item.relation.trim()))
     : [];
+  // При разводе или вдовстве без детей указываем родителей из личного дела.
+  const showParents = isNotMarried || (isDivorcedOrWidowed && children.length === 0);
+  const mother = showParents
+    ? family.find((item) => /^мать$/i.test(item.relation.trim()))
+    : undefined;
+  const father = showParents
+    ? family.find((item) => /^отец$/i.test(item.relation.trim()))
+    : undefined;
   const familyDetail = (item?: FamilyMember) => item
     ? [item.fullName, formatDate(item.birthDate, "")].filter(Boolean).join(", ")
     : "";
@@ -822,9 +925,9 @@ function documentValues(
     employee.militaryDocIssuedBy,
   ].filter(Boolean).join(", ");
   return {
-    ORG_NAME: headerLocation === "moscow" ? MOSCOW_WORKPLACE : settings.organizationName,
-    ORG_SHORT_NAME: headerLocation === "moscow" ? MOSCOW_WORKPLACE : settings.shortName,
-    ORG_ADDRESS: settings.organizationAddress,
+    ORG_NAME: organizationProfile.workplaceName || organizationProfile.organizationName,
+    ORG_SHORT_NAME: organizationProfile.shortName,
+    ORG_ADDRESS: organizationProfile.organizationAddress,
     LAST_NAME: employee.lastName,
     FIRST_NAME: employee.firstName,
     MIDDLE_NAME: employee.middleName,
@@ -874,14 +977,12 @@ function documentValues(
     WORK_PHONE: "",
     MOBILE_PHONE: employee.phone,
     RESERVE_CATEGORY: employee.reserveCategory,
-    COMMISSARIAT: employee.militaryCommissariat || settings.defaultCommissariat,
-    COMMISSARIAT_SHORT: employee.militaryCommissariat || settings.defaultCommissariat,
-    HEADER_AUTHORITY_TYPE: headerLocation === "sochi" ? "городского округа" : "военного",
-    HEADER_AUTHORITY_NAME: headerLocation === "sochi"
-      ? "город-курорт Сочи Краснодарского края"
-      : "комиссариата города Москвы",
-    F2_BRANCH_TITLE: headerLocation === "moscow" ? "ФИЛИАЛ АО ЦА «СОЛЯРИС»" : "",
-    F2_BRANCH_CITY: headerLocation === "moscow" ? "(город Москва)" : "",
+    COMMISSARIAT: employee.militaryCommissariat || organizationProfile.defaultCommissariat,
+    COMMISSARIAT_SHORT: employee.militaryCommissariat || organizationProfile.defaultCommissariat,
+    HEADER_AUTHORITY_TYPE: organizationProfile.headerAuthorityType,
+    HEADER_AUTHORITY_NAME: organizationProfile.headerAuthorityName,
+    F2_BRANCH_TITLE: organizationProfile.f2BranchTitle,
+    F2_BRANCH_CITY: organizationProfile.f2BranchCity,
     MILITARY_RANK: employee.militaryRank,
     COMPOSITION_PROFILE: [employee.composition, employee.profile].filter(Boolean).join(" / "),
     TEAM_NUMBER: "",
@@ -894,9 +995,9 @@ function documentValues(
     POSITION: employee.position,
     DEPARTMENT: employee.department,
     OUTGOING_DETAILS: "",
-    RESPONSIBLE_POSITION: settings.responsiblePosition,
-    RESPONSIBLE_NAME: settings.responsibleName,
-    RESPONSIBLE_PHONE: settings.responsiblePhone,
+    RESPONSIBLE_POSITION: organizationProfile.responsiblePosition,
+    RESPONSIBLE_NAME: organizationProfile.responsibleName,
+    RESPONSIBLE_PHONE: organizationProfile.responsiblePhone,
     SNILS: employee.snils,
     EVENT_HIRE: "принят (поступил) на работу",
     EVENT_DISMISSAL: "уволен с работы (отчислен из образовательной организации)",
@@ -908,8 +1009,8 @@ function documentValues(
     ORDER_DAY: orderDate ? String(orderDate.getDate()).padStart(2, "0") : "",
     ORDER_MONTH: orderDate ? monthNames[orderDate.getMonth()] : "",
     ORDER_YEAR: orderDate ? String(orderDate.getFullYear()).slice(-2) : "",
-    DIRECTOR_POSITION: settings.directorPosition,
-    DIRECTOR_NAME: settings.directorName,
+    DIRECTOR_POSITION: organizationProfile.directorPosition,
+    DIRECTOR_NAME: organizationProfile.directorName,
   };
 }
 
@@ -920,7 +1021,7 @@ async function buildDocx(
   eventType: "hire" | "dismissal",
   f2OrderNumber: string,
   f2OrderDate: string,
-  headerLocation: DocumentHeaderLocation,
+  organizationProfileId: OrganizationProfileId,
 ) {
   const templateName = type === "form10"
     ? "form10-template.docx"
@@ -932,13 +1033,10 @@ async function buildDocx(
   const response = await fetch(assetUrl(templateName), { cache: "no-store" });
   if (!response.ok) throw new Error("Не удалось загрузить шаблон Word");
   const archive = unzipSync(new Uint8Array(await response.arrayBuffer()));
-  const values = documentValues(employee, settings, eventType, f2OrderNumber, f2OrderDate, headerLocation);
-  if (type === "f2" && headerLocation === "moscow") {
-    Object.assign(values, {
-      ORG_ADDRESS: "Российская Федерация, город Москва, вн. тер. г. муниципальный округ Пресненский, наб. Пресненская, д. 12, помещ. 20/80",
-      ORG_NAME: "Акционерное общество Центр авиации «Солярис»",
-      ORG_SHORT_NAME: "Филиал АО ЦА «Солярис» (город Москва)",
-    });
+  const values = documentValues(employee, settings, eventType, f2OrderNumber, f2OrderDate, organizationProfileId);
+  if (type !== "form10" && type !== "messageSheet") {
+    const profile = settings.profiles[organizationProfileId];
+    values.ORG_NAME = profile.organizationName || profile.workplaceName;
   }
   for (const [path, content] of Object.entries(archive)) {
     if (!path.startsWith("word/") || !path.endsWith(".xml")) continue;
@@ -958,7 +1056,7 @@ async function buildChangesDocx(
   entries: ChangeDocumentEntry[],
   employees: Employee[],
   settings: OrganizationSettings,
-  headerLocation: DocumentHeaderLocation,
+  organizationProfileId: OrganizationProfileId,
 ) {
   const response = await fetch(assetUrl("changes-template.docx"), { cache: "no-store" });
   if (!response.ok) throw new Error("Не удалось загрузить шаблон Word");
@@ -995,7 +1093,8 @@ async function buildChangesDocx(
 
   const firstEmployee = employees.find((item) => item.id === entries[0]?.employeeId);
   if (!firstEmployee) throw new Error("Не выбран сотрудник");
-  const values = documentValues(firstEmployee, settings, "hire", "", "", headerLocation);
+  const values = documentValues(firstEmployee, settings, "hire", "", "", organizationProfileId);
+  values.ORG_NAME = settings.profiles[organizationProfileId].organizationName || values.ORG_NAME;
   for (const [key, value] of Object.entries(values)) {
     xml = xml.replaceAll(`{{${key}}}`, xmlValue(value));
   }
@@ -1011,7 +1110,7 @@ async function buildPersonnelListDocx(
   employeeIds: string[],
   employees: Employee[],
   settings: OrganizationSettings,
-  headerLocation: DocumentHeaderLocation,
+  organizationProfileId: OrganizationProfileId,
 ) {
   const templateName = type === "officerList" ? "officer-list-template.docx" : "enlisted-list-template.docx";
   let archive: ReturnType<typeof unzipSync>;
@@ -1058,7 +1157,8 @@ async function buildPersonnelListDocx(
   xml = `${xml.slice(0, rowStart)}${rows}${xml.slice(rowEnd)}`;
   const firstEmployee = selectedEmployees[0];
   if (!firstEmployee) throw new Error("Не выбран сотрудник");
-  const values = documentValues(firstEmployee, settings, "hire", "", "", headerLocation);
+  const values = documentValues(firstEmployee, settings, "hire", "", "", organizationProfileId);
+  values.ORG_NAME = settings.profiles[organizationProfileId].organizationName || values.ORG_NAME;
   for (const [key, value] of Object.entries(values)) xml = xml.replaceAll(`{{${key}}}`, xmlValue(value));
   xml = xml.replace(/\{\{[A-Z0-9_]+\}\}/g, "");
   archive[documentPath] = strToU8(xml);
@@ -1108,6 +1208,61 @@ function Field({
         onChange={(event) => onChange(event.target.value)}
       />
     </label>
+  );
+}
+
+function OrganizationProfileSelect({
+  value,
+  onChange,
+}: {
+  value: OrganizationProfileId;
+  onChange: (value: OrganizationProfileId) => void;
+}) {
+  return (
+    <label className="field">
+      <span>Организация</span>
+      <select value={value} onChange={(event) => onChange(event.target.value as OrganizationProfileId)}>
+        {(Object.entries(ORGANIZATION_PROFILE_LABELS) as [OrganizationProfileId, string][]).map(([id, label]) => (
+          <option value={id} key={id}>{label}</option>
+        ))}
+      </select>
+    </label>
+  );
+}
+
+function OrganizationProfileFields({
+  id,
+  profile,
+  onChange,
+}: {
+  id: OrganizationProfileId;
+  profile: OrganizationProfile;
+  onChange: (patch: Partial<OrganizationProfile>) => void;
+}) {
+  return (
+    <section className="organization-profile-card">
+      <div className="organization-profile-heading">
+        <span>{id === "solar_sochi" ? "1" : id === "solar_moscow" ? "2" : "3"}</span>
+        <div><h4>{ORGANIZATION_PROFILE_LABELS[id]}</h4><p>Реквизиты этого профиля используются после его выбора при выгрузке.</p></div>
+      </div>
+      <div className="form-grid two-col">
+        <Field label="Место работы" value={profile.workplaceName} help="Подставляется в Форму № 10 и «Листок сообщений»." onChange={(value)=>onChange({workplaceName:value})}/>
+        <Field label="Полное наименование организации" value={profile.organizationName} help="Подставляется в шапки справок, сведений и списков." onChange={(value)=>onChange({organizationName:value})}/>
+        <Field label="Краткое наименование" value={profile.shortName} onChange={(value)=>onChange({shortName:value})}/>
+        <Field label="Адрес организации" value={profile.organizationAddress} onChange={(value)=>onChange({organizationAddress:value})}/>
+        <Field label="Тип органа в шапке" value={profile.headerAuthorityType} placeholder="например: военного" onChange={(value)=>onChange({headerAuthorityType:value})}/>
+        <Field label="Наименование органа в шапке" value={profile.headerAuthorityName} placeholder="например: комиссариата города Москвы" onChange={(value)=>onChange({headerAuthorityName:value})}/>
+        <Field label="Надпись под логотипом Ф-2 — строка 1" value={profile.f2BranchTitle} onChange={(value)=>onChange({f2BranchTitle:value})}/>
+        <Field label="Надпись под логотипом Ф-2 — строка 2" value={profile.f2BranchCity} onChange={(value)=>onChange({f2BranchCity:value})}/>
+        <Field label="Должность руководителя" value={profile.directorPosition} onChange={(value)=>onChange({directorPosition:value})}/>
+        <Field label="Ф.И.О. руководителя" value={profile.directorName} onChange={(value)=>onChange({directorName:value})}/>
+        <Field label="Должность специалиста по воинскому учёту" value={profile.responsiblePosition} onChange={(value)=>onChange({responsiblePosition:value})}/>
+        <Field label="Ф.И.О. специалиста по воинскому учёту" value={profile.responsibleName} onChange={(value)=>onChange({responsibleName:value})}/>
+        <Field label="Телефон специалиста по воинскому учёту" value={profile.responsiblePhone} onChange={(value)=>onChange({responsiblePhone:value})}/>
+        <Field label="Военкомат по умолчанию" value={profile.defaultCommissariat} onChange={(value)=>onChange({defaultCommissariat:value})}/>
+        <Field label="Адрес военкомата" value={profile.defaultCommissariatAddress} onChange={(value)=>onChange({defaultCommissariatAddress:value})}/>
+      </div>
+    </section>
   );
 }
 
@@ -1181,7 +1336,7 @@ export default function HomePage() {
   const [notices, setNotices] = useState<Notice[]>([]);
   const [documents, setDocuments] = useState<DocumentRecord[]>([]);
   const [employeeChanges, setEmployeeChanges] = useState<EmployeeChangeRecord[]>([]);
-  const [organization, setOrganization] = useState<OrganizationSettings>(emptySettings);
+  const [organization, setOrganization] = useState<OrganizationSettings>(() => defaultSettings());
   const [employeeModal, setEmployeeModal] = useState<Employee | null>(null);
   const [eventModal, setEventModal] = useState(false);
   const [importPreview, setImportPreview] = useState<{
@@ -1205,7 +1360,7 @@ export default function HomePage() {
   const [f2Event, setF2Event] = useState<"hire" | "dismissal">("hire");
   const [f2OrderNumber, setF2OrderNumber] = useState("");
   const [f2OrderDate, setF2OrderDate] = useState("");
-  const [documentHeaderLocation, setDocumentHeaderLocation] = useState<DocumentHeaderLocation>("moscow");
+  const [documentOrganizationProfile, setDocumentOrganizationProfile] = useState<OrganizationProfileId>("solar_moscow");
   const [lastBackupAt, setLastBackupAt] = useState("");
   const [changeEmployeeToAdd, setChangeEmployeeToAdd] = useState("");
   const [changeDocumentEntries, setChangeDocumentEntries] = useState<ChangeDocumentEntry[]>([]);
@@ -1233,10 +1388,13 @@ export default function HomePage() {
       const raw = localStorage.getItem(STORAGE_KEY);
       if (raw) {
         const stored = JSON.parse(raw) as Partial<StoredState>;
-        const storedSettings = { ...emptySettings, ...(stored.settings ?? {}) };
-        setEmployees(Array.isArray(stored.employees) ? stored.employees.map((employee) => normalizeEmployee(employee, storedSettings)) : []);
+        const storedSettings = normalizeOrganizationSettings(stored.settings);
+        setEmployees(Array.isArray(stored.employees) ? stored.employees.map((employee) => normalizeEmployee(employee)) : []);
         setNotices(Array.isArray(stored.notices) ? stored.notices : []);
-        setDocuments(Array.isArray(stored.documents) ? stored.documents : []);
+        setDocuments(Array.isArray(stored.documents) ? stored.documents.map((record) => ({
+          ...record,
+          organizationProfile: normalizeOrganizationProfileId(record.organizationProfile ?? record.headerLocation),
+        })) : []);
         setEmployeeChanges(Array.isArray(stored.employeeChanges) ? stored.employeeChanges : []);
         setOrganization(storedSettings);
       }
@@ -1289,11 +1447,14 @@ export default function HomePage() {
     result[rank] = (result[rank] ?? 0) + 1;
     return result;
   }, {});
+  const selectedOrganizationProfile = organization.profiles[documentOrganizationProfile];
+  const usesWorkplaceName = documentType === "form10" || documentType === "messageSheet";
   const documentSettingsMissing = [
-    !organization.organizationName && "наименование организации",
-    !organization.organizationAddress && "адрес организации",
-    !organization.responsiblePosition && "должность ответственного",
-    !organization.responsibleName && "Ф.И.О. ответственного",
+    !(usesWorkplaceName ? selectedOrganizationProfile.workplaceName : selectedOrganizationProfile.organizationName) && (usesWorkplaceName ? "место работы" : "полное наименование организации"),
+    !usesWorkplaceName && !selectedOrganizationProfile.organizationAddress && "адрес организации",
+    !selectedOrganizationProfile.responsiblePosition && "должность ответственного",
+    !selectedOrganizationProfile.responsibleName && "Ф.И.О. ответственного",
+    !usesWorkplaceName && !selectedOrganizationProfile.headerAuthorityName && "наименование органа в шапке",
   ].filter((value): value is string => Boolean(value));
   const documentParameterMissing = documentType === "f2" || documentType === "employmentNotice"
     ? [!f2OrderNumber.trim() && "номер приказа", !f2OrderDate && "дата приказа"].filter((value): value is string => Boolean(value))
@@ -1460,7 +1621,7 @@ export default function HomePage() {
   }
 
   function openNewEmployee() {
-    setEmployeeModal(emptyEmployee(organization));
+    setEmployeeModal(emptyEmployee());
   }
 
   function saveEmployee(event: FormEvent) {
@@ -1627,7 +1788,7 @@ export default function HomePage() {
     const militaryDoc = cleanCell(rowValue(row, "военный билет"));
     const legacyDriverLicense = cleanCell(rowValue(row, "водительское удостоверение", "водительские права"));
     return {
-      ...emptyEmployee(organization),
+      ...emptyEmployee(),
       ...name,
       fullName,
       department: cleanCell(rowValue(row, "подразделение")),
@@ -1868,7 +2029,7 @@ export default function HomePage() {
         type,
         createdAt: new Date().toISOString(),
         status: "formed",
-        headerLocation: documentHeaderLocation,
+        organizationProfile: documentOrganizationProfile,
         eventType: type === "f2" || type === "employmentNotice" ? f2Event : undefined,
         orderNumber: type === "f2" || type === "employmentNotice" ? f2OrderNumber : undefined,
         orderDate: type === "f2" || type === "employmentNotice" ? f2OrderDate : undefined,
@@ -1925,7 +2086,7 @@ export default function HomePage() {
 
   function repeatDocument(record: DocumentRecord) {
     setDocumentType(record.type);
-    setDocumentHeaderLocation(record.headerLocation ?? "moscow");
+    setDocumentOrganizationProfile(normalizeOrganizationProfileId(record.organizationProfile ?? record.headerLocation));
     setF2Event(record.eventType ?? "hire");
     setF2OrderNumber(record.orderNumber ?? "");
     setF2OrderDate(record.orderDate ?? "");
@@ -1955,7 +2116,7 @@ export default function HomePage() {
           automaticListEntries.map((entry) => entry.employeeId),
           employees,
           organization,
-          documentHeaderLocation,
+          documentOrganizationProfile,
         );
         downloadBlob(blob, documentType === "officerList" ? "Список_офицеры.docx" : "Список_рядовые.docx");
         const firstEmployee = employees.find((item) => item.id === automaticListEntries[0].employeeId);
@@ -1978,7 +2139,7 @@ export default function HomePage() {
       if (documentSettingsMissing.length && !window.confirm(`В настройках не заполнено: ${documentSettingsMissing.join(", ")}.\n\nСкачать Word с пропусками?`)) return;
       try {
         setToast("Формируются сведения об изменениях…");
-        const blob = await buildChangesDocx(changeDocumentEntries, employees, organization, documentHeaderLocation);
+        const blob = await buildChangesDocx(changeDocumentEntries, employees, organization, documentOrganizationProfile);
         downloadBlob(blob, "Сведения_об_изменениях.docx");
         const firstEmployee = employees.find((item) => item.id === changeDocumentEntries[0].employeeId);
         if (firstEmployee) recordDocument(firstEmployee, documentType, changeDocumentEntries.map((entry) => entry.employeeId), changeDocumentEntries);
@@ -2004,7 +2165,7 @@ export default function HomePage() {
         f2Event,
         f2OrderNumber,
         f2OrderDate,
-        documentHeaderLocation,
+        documentOrganizationProfile,
       );
       downloadBlob(
         blob,
@@ -2149,10 +2310,13 @@ export default function HomePage() {
       const data = JSON.parse(await file.text()) as StoredState;
       if (!Array.isArray(data.employees) || !Array.isArray(data.notices)) throw new Error();
       if (!window.confirm("Заменить текущие данные содержимым резервной копии?")) return;
-      const restoredSettings = { ...emptySettings, ...(data.settings ?? {}) };
-      setEmployees(data.employees.map((employee) => normalizeEmployee(employee, restoredSettings)));
+      const restoredSettings = normalizeOrganizationSettings(data.settings);
+      setEmployees(data.employees.map((employee) => normalizeEmployee(employee)));
       setNotices(data.notices);
-      setDocuments(Array.isArray(data.documents) ? data.documents : []);
+      setDocuments(Array.isArray(data.documents) ? data.documents.map((record) => ({
+        ...record,
+        organizationProfile: normalizeOrganizationProfileId(record.organizationProfile ?? record.headerLocation),
+      })) : []);
       setEmployeeChanges(Array.isArray(data.employeeChanges) ? data.employeeChanges : []);
       setOrganization(restoredSettings);
       const restoredAt = new Date().toISOString();
@@ -2171,7 +2335,7 @@ export default function HomePage() {
     setNotices([]);
     setDocuments([]);
     setEmployeeChanges([]);
-    setOrganization(emptySettings);
+    setOrganization(defaultSettings());
     localStorage.removeItem(STORAGE_KEY);
     localStorage.removeItem(LAST_BACKUP_KEY);
     setLastBackupAt("");
@@ -2460,14 +2624,14 @@ export default function HomePage() {
                   <h3>Параметры документа</h3>
                   {!(["changes", "officerList", "enlistedList"] as DocumentType[]).includes(documentType) ? <label className="field"><span>Сотрудник</span><select value={documentEmployeeId} onChange={(e) => setDocumentEmployeeId(e.target.value)}><option value="">Выберите сотрудника</option>{employees.slice().sort((a,b)=>a.fullName.localeCompare(b.fullName,"ru")).map((employee)=><option value={employee.id} key={employee.id}>{employee.fullName}</option>)}</select></label> : null}
                   <div className="segmented document-types"><button className={documentType === "form10" ? "active" : ""} onClick={() => setDocumentType("form10")}>Форма № 10</button><button className={documentType === "f2" ? "active" : ""} onClick={() => setDocumentType("f2")}>Справка Ф-2</button><button className={documentType === "messageSheet" ? "active" : ""} onClick={() => setDocumentType("messageSheet")}>Листок сообщений</button><button className={documentType === "changes" ? "active" : ""} onClick={() => setDocumentType("changes")}>Изменение данных</button><button className={documentType === "employmentNotice" ? "active" : ""} onClick={() => setDocumentType("employmentNotice")}>Принятие / увольнение</button><button className={documentType === "officerList" ? "active" : ""} onClick={() => setDocumentType("officerList")}>Список: офицеры</button><button className={documentType === "enlistedList" ? "active" : ""} onClick={() => setDocumentType("enlistedList")}>Список: рядовые</button></div>
-                  {documentType === "form10" || documentType === "messageSheet" ? <label className="field"><span>Место работы</span><select value={documentHeaderLocation} onChange={(event) => setDocumentHeaderLocation(event.target.value as DocumentHeaderLocation)}><option value="moscow">Москва</option><option value="sochi">Сочи</option></select></label> : null}
+                  {documentType === "form10" || documentType === "messageSheet" ? <OrganizationProfileSelect value={documentOrganizationProfile} onChange={setDocumentOrganizationProfile}/> : null}
                   {documentType === "changes" ? <div className="change-document-options">
-                    <label className="field"><span>Место работы</span><select value={documentHeaderLocation} onChange={(event) => setDocumentHeaderLocation(event.target.value as DocumentHeaderLocation)}><option value="moscow">Москва</option><option value="sochi">Сочи</option></select></label>
+                    <OrganizationProfileSelect value={documentOrganizationProfile} onChange={setDocumentOrganizationProfile}/>
                     <div className="change-employee-add"><label className="field"><span>Добавить сотрудника</span><select value={changeEmployeeToAdd} onChange={(event)=>setChangeEmployeeToAdd(event.target.value)}><option value="">Выберите сотрудника</option>{employees.filter((employee)=>!changeDocumentEntries.some((entry)=>entry.employeeId===employee.id)).slice().sort((a,b)=>a.fullName.localeCompare(b.fullName,"ru")).map((employee)=><option value={employee.id} key={employee.id}>{employee.fullName}</option>)}</select></label><button type="button" className="button secondary" disabled={!changeEmployeeToAdd} onClick={()=>{setChangeDocumentEntries([...changeDocumentEntries,{employeeId:changeEmployeeToAdd,content:""}]);setChangeEmployeeToAdd("");}}><Plus size={16}/> Добавить</button></div>
                     <div className="change-entry-list">{changeDocumentEntries.map((entry)=>{const employee=employees.find((item)=>item.id===entry.employeeId);return <div className="change-entry" key={entry.employeeId}><div><strong>{employee?.fullName}</strong><button type="button" className="icon-button" aria-label="Удалить сотрудника из документа" onClick={()=>setChangeDocumentEntries(changeDocumentEntries.filter((item)=>item.employeeId!==entry.employeeId))}><Trash2 size={16}/></button></div>{documentType === "changes" ? <label className="field"><span>Содержание изменений</span><textarea value={entry.content} placeholder="Например: изменение места пребывания…" onChange={(event)=>setChangeDocumentEntries(changeDocumentEntries.map((item)=>item.employeeId===entry.employeeId?{...item,content:event.target.value}:item))}/></label> : null}</div>})}</div>
                   </div> : null}
                   {documentType === "officerList" || documentType === "enlistedList" ? <div className="change-document-options">
-                    <label className="field"><span>Место работы</span><select value={documentHeaderLocation} onChange={(event) => setDocumentHeaderLocation(event.target.value as DocumentHeaderLocation)}><option value="moscow">Москва</option><option value="sochi">Сочи</option></select></label>
+                    <OrganizationProfileSelect value={documentOrganizationProfile} onChange={setDocumentOrganizationProfile}/>
                     <div className="inline-success"><Check size={18}/><span><strong>Список сформирован автоматически</strong>Включены только действующие сотрудники с соответствующими воинскими званиями: {automaticListEntries.length}.</span></div>
                     <div className="document-check-summary"><strong>По званиям</strong><div>{Object.entries(listRankDistribution).map(([rank, count]) => <span className="status completed" key={rank}>{rank}: {count}</span>)}</div></div>
                     {listEmployeesWithGaps.length ? <div className="inline-warning"><AlertCircle size={18}/><span><strong>Незаполненные графы: {listEmployeesWithGaps.length} сотрудник(а)</strong>{listEmployeesWithGaps.slice(0, 4).map(({employee, check}) => `${employee.fullName}: ${check.critical.join(", ")}`).join("; ")}{listEmployeesWithGaps.length > 4 ? ` и ещё ${listEmployeesWithGaps.length - 4}` : ""}.</span></div> : null}
@@ -2475,7 +2639,7 @@ export default function HomePage() {
                     <div className="change-entry-list">{automaticListEntries.map((entry)=>{const employee=employees.find((item)=>item.id===entry.employeeId);return <div className="change-entry" key={entry.employeeId}><div><strong>{employee?.fullName}</strong><span>{employee?.militaryRank}</span></div></div>})}</div>
                   </div> : null}
                   {documentType === "f2" || documentType === "employmentNotice" ? <div className="f2-options">
-                    <label className="field"><span>Место работы</span><select value={documentHeaderLocation} onChange={(event) => setDocumentHeaderLocation(event.target.value as DocumentHeaderLocation)}><option value="moscow">Москва</option><option value="sochi">Сочи</option></select></label>
+                    <OrganizationProfileSelect value={documentOrganizationProfile} onChange={setDocumentOrganizationProfile}/>
                     <fieldset className="event-checklist"><legend>Отметка в справке</legend>
                       <label><input type="radio" name="f2-event" checked={f2Event==="hire"} onChange={()=>setF2Event("hire")}/><span>Принят (поступил) на работу</span></label>
                       <label><input type="radio" name="f2-event" checked={f2Event==="dismissal"} onChange={()=>setF2Event("dismissal")}/><span>Уволен с работы (отчислен из образовательной организации)</span></label>
@@ -2502,7 +2666,7 @@ export default function HomePage() {
                   </div>
                   <div className="preview-data">
                     <h4>Проверка перед выгрузкой</h4>
-                    <div><span>Место работы</span><strong>{documentHeaderLocation === "moscow" ? "Москва" : "Сочи"}</strong></div>
+                    <div><span>Организация</span><strong>{ORGANIZATION_PROFILE_LABELS[documentOrganizationProfile]}</strong></div>
                     {selectedDocumentEmployee && !(["changes", "officerList", "enlistedList"] as DocumentType[]).includes(documentType) ? <>
                       <div><span>Сотрудник</span><strong>{selectedDocumentEmployee.fullName}</strong></div>
                       <div><span>Звание / ВУС</span><strong>{selectedDocumentEmployee.militaryRank || "—"} / {selectedDocumentEmployee.vus || "—"}</strong></div>
@@ -2537,7 +2701,7 @@ export default function HomePage() {
                     <div className="document-history-main"><FileText size={20}/><span><strong>{record.title}</strong><small>{record.employeeCount && record.employeeCount > 1 ? `${record.employeeCount} сотрудник(а)` : person?.fullName ?? "Карточка удалена"}</small></span></div>
                     <div className="document-history-meta">
                       <span><b>Создан:</b> {new Intl.DateTimeFormat("ru-RU",{dateStyle:"short",timeStyle:"short"}).format(new Date(record.createdAt))}</span>
-                      {record.headerLocation ? <span><b>Шапка:</b> {record.headerLocation === "moscow" ? "Москва" : "Сочи"}</span> : null}
+                      {record.organizationProfile || record.headerLocation ? <span><b>Организация:</b> {ORGANIZATION_PROFILE_LABELS[normalizeOrganizationProfileId(record.organizationProfile ?? record.headerLocation)]}</span> : null}
                       {record.eventType ? <span><b>Событие:</b> {record.eventType === "hire" ? "Приём" : "Увольнение"}</span> : null}
                       {record.orderNumber || record.orderDate ? <span><b>Приказ:</b> № {record.orderNumber || "—"} от {formatDate(record.orderDate ?? "", "—")}</span> : null}
                       {record.noticeIds?.length ? <span><b>Связанные задачи:</b> {record.noticeIds.length}{status === "sent" ? " · закрыты автоматически" : " · закроются после отправки"}</span> : null}
@@ -2581,22 +2745,29 @@ export default function HomePage() {
           {view === "settings" ? (
             <>
               <section className="section-heading compact"><div><span className="eyebrow">Параметры рабочего контура</span><h2>Настройки и помощь</h2><p>Изменения сохраняются автоматически на этом устройстве.</p></div></section>
+              <section className="data-panel settings-card organization-settings-panel">
+                <div className="card-title"><span className="kpi-icon teal"><Settings size={20}/></span><div><h3>Организации для документов</h3><p>Заполните три независимых профиля. Нужный профиль выбирается перед каждой выгрузкой Word.</p></div></div>
+                <div className="organization-profiles">
+                  {(Object.keys(ORGANIZATION_PROFILE_LABELS) as OrganizationProfileId[]).map((id) => (
+                    <OrganizationProfileFields
+                      id={id}
+                      profile={organization.profiles[id]}
+                      key={id}
+                      onChange={(patch) => setOrganization((current) => ({
+                        ...current,
+                        profiles: {
+                          ...current.profiles,
+                          [id]: { ...current.profiles[id], ...patch },
+                        },
+                      }))}
+                    />
+                  ))}
+                </div>
+              </section>
               <div className="settings-grid">
                 <section className="data-panel settings-card">
-                  <div className="card-title"><span className="kpi-icon teal"><Settings size={20}/></span><div><h3>Организация</h3><p>Используется при заполнении Word.</p></div></div>
-                  <div className="form-grid two-col">
-                    <Field label="Полное наименование" value={organization.organizationName} onChange={(value)=>setOrganization({...organization,organizationName:value})}/>
-                    <Field label="Краткое наименование" value={organization.shortName} onChange={(value)=>setOrganization({...organization,shortName:value})}/>
-                    <Field label="Адрес организации" value={organization.organizationAddress} onChange={(value)=>setOrganization({...organization,organizationAddress:value})}/>
-                    <Field label="Должность руководителя" value={organization.directorPosition} onChange={(value)=>setOrganization({...organization,directorPosition:value})}/>
-                    <Field label="Ф.И.О. руководителя" value={organization.directorName} onChange={(value)=>setOrganization({...organization,directorName:value})}/>
-                    <Field label="Должность специалиста по воинскому учёту" value={organization.responsiblePosition} onChange={(value)=>setOrganization({...organization,responsiblePosition:value})}/>
-                    <Field label="Ф.И.О. специалиста по воинскому учёту" value={organization.responsibleName} onChange={(value)=>setOrganization({...organization,responsibleName:value})}/>
-                    <Field label="Телефон специалиста по воинскому учёту" value={organization.responsiblePhone} onChange={(value)=>setOrganization({...organization,responsiblePhone:value})}/>
-                    <Field label="Военкомат по умолчанию" value={organization.defaultCommissariat} onChange={(value)=>setOrganization({...organization,defaultCommissariat:value})}/>
-                    <Field label="Адрес военкомата" value={organization.defaultCommissariatAddress} onChange={(value)=>setOrganization({...organization,defaultCommissariatAddress:value})}/>
-                    <Field label="Дополнительные нерабочие дни" value={organization.extraHolidays} placeholder="2026-04-20, 2026-09-01" help="Укажите даты через запятую. Они будут исключены при расчёте сроков в рабочих днях." onChange={(value)=>setOrganization({...organization,extraHolidays:value})}/>
-                  </div>
+                  <div className="card-title"><span className="kpi-icon amber"><CalendarCheck size={20}/></span><div><h3>Рабочий календарь</h3><p>Общий для всех трёх профилей.</p></div></div>
+                  <Field label="Дополнительные нерабочие дни" value={organization.extraHolidays} placeholder="2026-04-20, 2026-09-01" help="Укажите даты через запятую. Они будут исключены при расчёте сроков в рабочих днях." onChange={(value)=>setOrganization({...organization,extraHolidays:value})}/>
                 </section>
                 <section className="data-panel settings-card">
                   <div className="card-title"><span className="kpi-icon blue"><Database size={20}/></span><div><h3>Локальные данные</h3><p>В сайт и на сервер персональные данные не отправляются.</p></div></div>
