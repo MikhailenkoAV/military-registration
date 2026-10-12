@@ -209,7 +209,7 @@ type Rule = {
 
 const STORAGE_KEY = "voinskiy-uchet-v1";
 const LAST_BACKUP_KEY = "voinskiy-uchet-last-backup";
-const APP_VERSION = "21.1";
+const APP_VERSION = "21.3";
 
 const ORGANIZATION_PROFILE_LABELS: Record<OrganizationProfileId, string> = {
   solar_sochi: "АО ЦА «Солярис» — Сочи",
@@ -786,7 +786,7 @@ function checkDocumentEmployee(employee: Employee, type: DocumentType): Document
   };
   const requiredByType: Partial<Record<DocumentType, (keyof Employee)[]>> = {
     form10: ["fullName", "birthDate", "birthPlace", "militaryRank", "reserveCategory", "composition", "vus", "fitnessCategory", "militaryDocNumber", "militaryCommissariat"],
-    f2: ["fullName", "birthDate", "birthPlace", "militaryRank", "vus", "militaryDocNumber", "position", "militaryCommissariat"],
+    f2: ["fullName", "birthDate", "birthPlace", "militaryRank", "vus", "militaryDocNumber", "militaryCommissariat", "position"],
     employmentNotice: ["fullName", "birthDate", "birthPlace", "militaryRank", "vus", "militaryDocNumber", "position"],
     messageSheet: ["fullName", "birthDate", "registrationAddress", "militaryDocNumber", "militaryCommissariat"],
     officerList: ["fullName", "militaryRank", "reserveCategory", "composition", "vus", "fitnessCategory", "birthDate", "birthPlace", "education", "maritalStatus", "position", "department"],
@@ -1094,9 +1094,13 @@ async function buildDocx(
     if (!path.startsWith("word/") || !path.endsWith(".xml")) continue;
     let xml = strFromU8(content);
     if (type === "f2") {
-      if (values.HEADER_AUTHORITY_NAME.length > 55) {
-        xml = resizeDocxPlaceholderRun(xml, "HEADER_AUTHORITY_NAME", 22);
-      }
+      const headerAuthorityHalfPoints = values.HEADER_AUTHORITY_NAME.length > 95
+        ? 18
+        : values.HEADER_AUTHORITY_NAME.length > 55
+          ? 22
+          : 26;
+      xml = resizeDocxPlaceholderRun(xml, "HEADER_AUTHORITY_TYPE", headerAuthorityHalfPoints);
+      xml = resizeDocxPlaceholderRun(xml, "HEADER_AUTHORITY_NAME", headerAuthorityHalfPoints);
       if (values.RESPONSIBLE_POSITION.length > 30) {
         xml = resizeDocxPlaceholderRun(xml, "RESPONSIBLE_POSITION", 18);
       }
@@ -2731,7 +2735,7 @@ export default function HomePage() {
                       <div><span>Сотрудник</span><strong>{selectedDocumentEmployee.fullName}</strong></div>
                       <div><span>Звание / ВУС</span><strong>{selectedDocumentEmployee.militaryRank || "—"} / {selectedDocumentEmployee.vus || "—"}</strong></div>
                       <div><span>Документ воинского учёта</span><strong>{selectedDocumentEmployee.militaryDocNumber || "—"}</strong></div>
-                      <div><span>Военный комиссариат</span><strong>{selectedDocumentEmployee.militaryCommissariat || "—"}</strong></div>
+                      <div><span>{documentType === "f2" ? "ВК в шапке Ф-2" : "Военный комиссариат"}</span><strong>{selectedDocumentEmployee.militaryCommissariat || "—"}</strong></div>
                       {documentType === "f2" || documentType === "employmentNotice" ? <>
                         <div><span>Событие</span><strong>{f2Event === "hire" ? "Принятие" : "Увольнение"}</strong></div>
                         <div><span>Приказ</span><strong>№ {f2OrderNumber || "—"} от {formatDate(f2OrderDate, "—")}</strong></div>

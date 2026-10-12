@@ -135,7 +135,8 @@ const profileEmployee = employee({
   accountType: "general",
   orderNumber: "15-к",
   orderDate: "2026-08-01",
-  militaryCommissariat: "Военный комиссариат Новомосковского и Троицкого административных округов города Москвы",
+  militaryDocIssuedBy: "Военный комиссариат города Москвы",
+  militaryCommissariat: "Военный комиссариат г. Воскресенска Московской обл.",
 });
 async function saveAndInspect(blob, filename, expected) {
   const bytes = new Uint8Array(await blob.arrayBuffer());
@@ -147,10 +148,14 @@ async function saveAndInspect(blob, filename, expected) {
   for (const value of expected) assert.ok(xml.includes(context.xmlValue(value)), `${filename}: missing ${value}`);
   fs.writeFileSync(path.join(organizationOutput, filename), bytes);
 }
+const longHeaderEmployee = {
+  ...profileEmployee,
+  militaryCommissariat: "Военный комиссариат Московской области по городам Шатура, Егорьевск, Рошаль, Шатурскому и Егорьевскому районам",
+};
 await saveAndInspect(
-  await context.buildDocx(profileEmployee, realisticSettings, "f2", "hire", "15-к", "2026-08-01", "solar_moscow"),
+  await context.buildDocx(longHeaderEmployee, realisticSettings, "f2", "hire", "15-к", "2026-08-01", "solar_moscow"),
   "f2-header-long-realistic.docx",
-  ["комиссариата Новомосковского и Троицкого административных округов города Москвы"],
+  ["комиссариата Московской области по городам Шатура, Егорьевск, Рошаль, Шатурскому и Егорьевскому районам"],
 );
 for (const profileId of ["solar_sochi", "solar_moscow", "airline_solaris"]) {
   const profile = settings.profiles[profileId];
@@ -165,7 +170,7 @@ for (const profileId of ["solar_sochi", "solar_moscow", "airline_solaris"]) {
   assert.equal(actual.RESPONSIBLE_NAME, profile.responsibleName);
   const f2Actual = context.documentValues(profileEmployee, settings, "hire", "15-к", "2026-08-01", profileId, "f2");
   assert.equal(f2Actual.HEADER_AUTHORITY_TYPE, "военного");
-  assert.equal(f2Actual.HEADER_AUTHORITY_NAME, "комиссариата Новомосковского и Троицкого административных округов города Москвы");
+  assert.equal(f2Actual.HEADER_AUTHORITY_NAME, "комиссариата г. Воскресенска Московской обл.");
   for (const type of ["form10", "f2", "messageSheet", "employmentNotice"]) {
     const expectedName = type === "form10" || type === "messageSheet" ? profile.workplaceName : profile.organizationName;
     const expected = [expectedName];
@@ -192,7 +197,7 @@ for (const profileId of ["solar_sochi", "solar_moscow", "airline_solaris"]) {
   }
 }
 const abbreviatedF2 = context.documentValues(
-  employee({ militaryCommissariat: "ВК Амурской обл. по г. Благовещенск и Благовещенскому р-ну" }),
+  employee({ militaryDocIssuedBy: "Военный комиссариат города Москвы", militaryCommissariat: "ВК Амурской обл. по г. Благовещенск и Благовещенскому р-ну" }),
   settings,
   "hire",
   "15-к",
@@ -213,6 +218,7 @@ await saveAndInspect(
   ["военного", "комиссариата города Москвы"],
 );
 const abbreviatedF2Employee = employee({
+  militaryDocIssuedBy: "Военный комиссариат города Москвы",
   militaryCommissariat: "ВК Амурской обл. по г. Благовещенск и Благовещенскому р-ну",
   orderNumber: "15-к",
   orderDate: "2026-08-01",
@@ -227,6 +233,16 @@ await saveAndInspect(
   "f2-header-abbreviated-realistic.docx",
   [abbreviatedF2.HEADER_AUTHORITY_NAME],
 );
+const ignoresIssuerF2 = context.documentValues(
+  employee({ militaryDocIssuedBy: "Военный комиссариат г. Воскресенска Московской обл.", militaryCommissariat: "Военный комиссариат города Москвы" }),
+  settings,
+  "hire",
+  "15-к",
+  "2026-08-01",
+  "solar_moscow",
+  "f2",
+);
+assert.equal(ignoresIssuerF2.HEADER_AUTHORITY_NAME, "комиссариата города Москвы");
 // Optional local-only verification: no backup records are copied into source or fixtures.
 if (process.argv[2]) {
   const backup = JSON.parse(fs.readFileSync(process.argv[2], "utf8"));
@@ -234,14 +250,25 @@ if (process.argv[2]) {
   assert.equal(matches.length, 1, "Expected one employee in the supplied backup");
   const restoredSettings = context.normalizeOrganizationSettings(backup.settings);
   const person = context.normalizeEmployee(matches[0]);
-  for (const profileId of ["solar_moscow", "solar_sochi", "airline_solaris"]) {
-    const actual = context.documentValues(person, restoredSettings, "hire", "", "", profileId);
-    for (const relation of ["Мать", "Отец"]) {
-      const parent = context.familyRows(person.familyMembers).find((item) => item.relation === relation);
-      assert.ok(parent, `Missing ${relation} in backup`);
-      assert.equal(actual[relation === "Мать" ? "MOTHER_DETAILS" : "FATHER_DETAILS"], `${relation}: ${parent.fullName}, ${context.formatDate(parent.birthDate, "")}`);
+  if (process.argv[4] === "f2") {
+    const actual = context.documentValues(person, restoredSettings, "hire", person.orderNumber, person.orderDate, "solar_moscow", "f2");
+    const expected = context.f2HeaderAuthority(person.militaryCommissariat);
+    assert.equal(actual.HEADER_AUTHORITY_NAME, expected.name);
+    await saveAndInspect(
+      await context.buildDocx(person, restoredSettings, "f2", "hire", person.orderNumber, person.orderDate, "solar_moscow"),
+      `f2-backup-${person.lastName}.docx`,
+      [expected.name],
+    );
+  } else {
+    for (const profileId of ["solar_moscow", "solar_sochi", "airline_solaris"]) {
+      const actual = context.documentValues(person, restoredSettings, "hire", "", "", profileId);
+      for (const relation of ["Мать", "Отец"]) {
+        const parent = context.familyRows(person.familyMembers).find((item) => item.relation === relation);
+        assert.ok(parent, `Missing ${relation} in backup`);
+        assert.equal(actual[relation === "Мать" ? "MOTHER_DETAILS" : "FATHER_DETAILS"], `${relation}: ${parent.fullName}, ${context.formatDate(parent.birthDate, "")}`);
+      }
+      await generate(`message-sheet-backup-${profileId}.docx`, person, restoredSettings, profileId);
     }
-    await generate(`message-sheet-backup-${profileId}.docx`, person, restoredSettings, profileId);
   }
 }
 console.log("PASS: family selection regression cases and application DOCX generation");
