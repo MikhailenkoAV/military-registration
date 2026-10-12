@@ -11,7 +11,7 @@ const outputDirectory = path.join(root, "work/rendered-message-sheet");
 // Exercise the actual application functions, not a copy of the selection logic.
 const source = fs.readFileSync(path.join(root, "app/page.tsx"), "utf8");
 const ast = ts.createSourceFile("page.tsx", source, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
-const functions = new Set(["emptyOrganizationProfile", "defaultSettings", "normalizeOrganizationSettings", "makeId", "emptyEmployee", "normalizeEmployee", "parseLocalDate", "formatDate", "familyRows", "maritalStatusKind", "documentMaritalStatus", "documentValues", "assetUrl", "xmlValue", "buildDocx", "buildChangesDocx", "buildPersonnelListDocx"]);
+const functions = new Set(["emptyOrganizationProfile", "defaultSettings", "normalizeOrganizationSettings", "makeId", "emptyEmployee", "normalizeEmployee", "parseLocalDate", "formatDate", "familyRows", "maritalStatusKind", "documentMaritalStatus", "f2HeaderAuthority", "documentValues", "assetUrl", "xmlValue", "resizeDocxPlaceholderRun", "buildDocx", "buildChangesDocx", "buildPersonnelListDocx"]);
 const constants = new Set(["APP_VERSION"]);
 const extracted = ast.statements.filter((node) =>
   (ts.isFunctionDeclaration(node) && functions.has(node.name?.text)) ||
@@ -30,6 +30,12 @@ const context = vm.createContext({
 });
 vm.runInContext(ts.transpileModule(extracted, { compilerOptions: { target: ts.ScriptTarget.ES2022 } }).outputText, context);
 const settings = context.defaultSettings();
+const realisticSettings = context.defaultSettings();
+Object.assign(realisticSettings.profiles.solar_moscow, {
+  directorName: "Иванов И.И.",
+  responsibleName: "Михайленко А.В.",
+  responsiblePhone: "+7 900 000-00-00",
+});
 const migrated = context.normalizeOrganizationSettings({
   organizationName: "Старое наименование",
   shortName: "Старое краткое",
@@ -129,6 +135,7 @@ const profileEmployee = employee({
   accountType: "general",
   orderNumber: "15-к",
   orderDate: "2026-08-01",
+  militaryCommissariat: "Военный комиссариат Новомосковского и Троицкого административных округов города Москвы",
 });
 async function saveAndInspect(blob, filename, expected) {
   const bytes = new Uint8Array(await blob.arrayBuffer());
@@ -140,6 +147,11 @@ async function saveAndInspect(blob, filename, expected) {
   for (const value of expected) assert.ok(xml.includes(context.xmlValue(value)), `${filename}: missing ${value}`);
   fs.writeFileSync(path.join(organizationOutput, filename), bytes);
 }
+await saveAndInspect(
+  await context.buildDocx(profileEmployee, realisticSettings, "f2", "hire", "15-к", "2026-08-01", "solar_moscow"),
+  "f2-header-long-realistic.docx",
+  ["комиссариата Новомосковского и Троицкого административных округов города Москвы"],
+);
 for (const profileId of ["solar_sochi", "solar_moscow", "airline_solaris"]) {
   const profile = settings.profiles[profileId];
   const actual = context.documentValues(profileEmployee, settings, "hire", "15-к", "2026-08-01", profileId);
@@ -151,11 +163,15 @@ for (const profileId of ["solar_sochi", "solar_moscow", "airline_solaris"]) {
   assert.equal(actual.F2_BRANCH_TITLE, profile.f2BranchTitle);
   assert.equal(actual.F2_BRANCH_CITY, profile.f2BranchCity);
   assert.equal(actual.RESPONSIBLE_NAME, profile.responsibleName);
+  const f2Actual = context.documentValues(profileEmployee, settings, "hire", "15-к", "2026-08-01", profileId, "f2");
+  assert.equal(f2Actual.HEADER_AUTHORITY_TYPE, "военного");
+  assert.equal(f2Actual.HEADER_AUTHORITY_NAME, "комиссариата Новомосковского и Троицкого административных округов города Москвы");
   for (const type of ["form10", "f2", "messageSheet", "employmentNotice"]) {
     const expectedName = type === "form10" || type === "messageSheet" ? profile.workplaceName : profile.organizationName;
     const expected = [expectedName];
     if (type === "f2") expected.push(profile.shortName, profile.f2BranchTitle, profile.f2BranchCity);
-    if (type === "f2" || type === "employmentNotice") expected.push(profile.organizationAddress, profile.headerAuthorityName);
+    if (type === "f2") expected.push(profile.organizationAddress, f2Actual.HEADER_AUTHORITY_NAME);
+    if (type === "employmentNotice") expected.push(profile.organizationAddress, profile.headerAuthorityName);
     await saveAndInspect(
       await context.buildDocx(profileEmployee, settings, type, "hire", "15-к", "2026-08-01", profileId),
       `${profileId}-${type}.docx`,
@@ -175,6 +191,42 @@ for (const profileId of ["solar_sochi", "solar_moscow", "airline_solaris"]) {
     );
   }
 }
+const abbreviatedF2 = context.documentValues(
+  employee({ militaryCommissariat: "ВК Амурской обл. по г. Благовещенск и Благовещенскому р-ну" }),
+  settings,
+  "hire",
+  "15-к",
+  "2026-08-01",
+  "solar_sochi",
+  "f2",
+);
+assert.equal(abbreviatedF2.HEADER_AUTHORITY_TYPE, "военного");
+assert.equal(abbreviatedF2.HEADER_AUTHORITY_NAME, "комиссариата Амурской обл. по г. Благовещенск и Благовещенскому р-ну");
+const shortF2Employee = employee({
+  militaryCommissariat: "Военный комиссариат города Москвы",
+  orderNumber: "15-к",
+  orderDate: "2026-08-01",
+});
+await saveAndInspect(
+  await context.buildDocx(shortF2Employee, settings, "f2", "hire", "15-к", "2026-08-01", "solar_moscow"),
+  "f2-header-short.docx",
+  ["военного", "комиссариата города Москвы"],
+);
+const abbreviatedF2Employee = employee({
+  militaryCommissariat: "ВК Амурской обл. по г. Благовещенск и Благовещенскому р-ну",
+  orderNumber: "15-к",
+  orderDate: "2026-08-01",
+});
+await saveAndInspect(
+  await context.buildDocx(abbreviatedF2Employee, settings, "f2", "hire", "15-к", "2026-08-01", "solar_sochi"),
+  "f2-header-abbreviated.docx",
+  [abbreviatedF2.HEADER_AUTHORITY_NAME],
+);
+await saveAndInspect(
+  await context.buildDocx(abbreviatedF2Employee, realisticSettings, "f2", "hire", "15-к", "2026-08-01", "solar_moscow"),
+  "f2-header-abbreviated-realistic.docx",
+  [abbreviatedF2.HEADER_AUTHORITY_NAME],
+);
 // Optional local-only verification: no backup records are copied into source or fixtures.
 if (process.argv[2]) {
   const backup = JSON.parse(fs.readFileSync(process.argv[2], "utf8"));

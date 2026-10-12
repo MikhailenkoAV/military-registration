@@ -209,7 +209,7 @@ type Rule = {
 
 const STORAGE_KEY = "voinskiy-uchet-v1";
 const LAST_BACKUP_KEY = "voinskiy-uchet-last-backup";
-const APP_VERSION = "21.0";
+const APP_VERSION = "21.1";
 
 const ORGANIZATION_PROFILE_LABELS: Record<OrganizationProfileId, string> = {
   solar_sochi: "АО ЦА «Солярис» — Сочи",
@@ -786,7 +786,7 @@ function checkDocumentEmployee(employee: Employee, type: DocumentType): Document
   };
   const requiredByType: Partial<Record<DocumentType, (keyof Employee)[]>> = {
     form10: ["fullName", "birthDate", "birthPlace", "militaryRank", "reserveCategory", "composition", "vus", "fitnessCategory", "militaryDocNumber", "militaryCommissariat"],
-    f2: ["fullName", "birthDate", "birthPlace", "militaryRank", "vus", "militaryDocNumber", "position"],
+    f2: ["fullName", "birthDate", "birthPlace", "militaryRank", "vus", "militaryDocNumber", "position", "militaryCommissariat"],
     employmentNotice: ["fullName", "birthDate", "birthPlace", "militaryRank", "vus", "militaryDocNumber", "position"],
     messageSheet: ["fullName", "birthDate", "registrationAddress", "militaryDocNumber", "militaryCommissariat"],
     officerList: ["fullName", "militaryRank", "reserveCategory", "composition", "vus", "fitnessCategory", "birthDate", "birthPlace", "education", "maritalStatus", "position", "department"],
@@ -794,7 +794,7 @@ function checkDocumentEmployee(employee: Employee, type: DocumentType): Document
   };
   const warningByType: Partial<Record<DocumentType, (keyof Employee)[]>> = {
     form10: ["registrationAddress", "education", "maritalStatus", "position", "department"],
-    f2: ["registrationAddress", "militaryCommissariat"],
+    f2: ["registrationAddress"],
     employmentNotice: ["registrationAddress", "militaryCommissariat"],
     messageSheet: ["maritalStatus", "militaryRank", "vus"],
   };
@@ -858,6 +858,23 @@ function xmlValue(value: unknown) {
     .replaceAll("\n", '</w:t><w:br/><w:t xml:space="preserve">');
 }
 
+function resizeDocxPlaceholderRun(xml: string, placeholder: string, halfPoints: number) {
+  const marker = `{{${placeholder}}}`;
+  const markerIndex = xml.indexOf(marker);
+  if (markerIndex < 0) return xml;
+  const runStart = Math.max(xml.lastIndexOf("<w:r ", markerIndex), xml.lastIndexOf("<w:r>", markerIndex));
+  const runEnd = xml.indexOf("</w:r>", markerIndex);
+  if (runStart < 0 || runEnd < markerIndex) return xml;
+  let run = xml.slice(runStart, runEnd + "</w:r>".length);
+  run = /<w:sz w:val="\d+"\/>/.test(run)
+    ? run.replace(/<w:sz w:val="\d+"\/>/, `<w:sz w:val="${halfPoints}"/>`)
+    : run.replace("<w:rPr>", `<w:rPr><w:sz w:val="${halfPoints}"/>`);
+  run = /<w:szCs w:val="\d+"\/>/.test(run)
+    ? run.replace(/<w:szCs w:val="\d+"\/>/, `<w:szCs w:val="${halfPoints}"/>`)
+    : run.replace("<w:rPr>", `<w:rPr><w:szCs w:val="${halfPoints}"/>`);
+  return `${xml.slice(0, runStart)}${run}${xml.slice(runEnd + "</w:r>".length)}`;
+}
+
 type MaritalStatusKind = "married" | "single" | "divorcedOrWidowed" | "unknown";
 
 function maritalStatusKind(value: string): MaritalStatusKind {
@@ -875,6 +892,37 @@ function documentMaritalStatus(employee: Employee) {
   return employee.maritalStatus;
 }
 
+function f2HeaderAuthority(militaryCommissariat: string) {
+  const value = militaryCommissariat.trim().replace(/\s+/g, " ");
+  if (!value) return { type: "", name: "" };
+  if (/^военный комиссариат(?=\s|$)/i.test(value)) {
+    return {
+      type: "военного",
+      name: value.replace(/^военный комиссариат(?=\s|$)/i, "комиссариата"),
+    };
+  }
+  if (/^военного комиссариата(?=\s|$)/i.test(value)) {
+    return {
+      type: "военного",
+      name: value.replace(/^военного комиссариата(?=\s|$)/i, "комиссариата"),
+    };
+  }
+  if (/^комиссариат(?=\s|$)/i.test(value)) {
+    return {
+      type: "военного",
+      name: value.replace(/^комиссариат(?=\s|$)/i, "комиссариата"),
+    };
+  }
+  if (/^комиссариата(?=\s|$)/i.test(value)) return { type: "военного", name: value };
+  if (/^ВК(?=\s|$)/i.test(value)) {
+    return {
+      type: "военного",
+      name: value.replace(/^ВК(?=\s|$)/i, "комиссариата"),
+    };
+  }
+  return { type: "военного", name: value };
+}
+
 function documentValues(
   employee: Employee,
   settings: OrganizationSettings,
@@ -882,8 +930,12 @@ function documentValues(
   f2OrderNumber: string,
   f2OrderDate: string,
   organizationProfileId: OrganizationProfileId,
+  documentType?: DocumentType,
 ) {
   const organizationProfile = settings.profiles[organizationProfileId];
+  const headerAuthority = documentType === "f2"
+    ? f2HeaderAuthority(employee.militaryCommissariat)
+    : { type: organizationProfile.headerAuthorityType, name: organizationProfile.headerAuthorityName };
   const family = familyRows(employee.familyMembers);
   const maritalKind = maritalStatusKind(employee.maritalStatus);
   const isMarried = maritalKind === "married";
@@ -979,8 +1031,8 @@ function documentValues(
     RESERVE_CATEGORY: employee.reserveCategory,
     COMMISSARIAT: employee.militaryCommissariat || organizationProfile.defaultCommissariat,
     COMMISSARIAT_SHORT: employee.militaryCommissariat || organizationProfile.defaultCommissariat,
-    HEADER_AUTHORITY_TYPE: organizationProfile.headerAuthorityType,
-    HEADER_AUTHORITY_NAME: organizationProfile.headerAuthorityName,
+    HEADER_AUTHORITY_TYPE: headerAuthority.type,
+    HEADER_AUTHORITY_NAME: headerAuthority.name,
     F2_BRANCH_TITLE: organizationProfile.f2BranchTitle,
     F2_BRANCH_CITY: organizationProfile.f2BranchCity,
     MILITARY_RANK: employee.militaryRank,
@@ -1033,7 +1085,7 @@ async function buildDocx(
   const response = await fetch(assetUrl(templateName), { cache: "no-store" });
   if (!response.ok) throw new Error("Не удалось загрузить шаблон Word");
   const archive = unzipSync(new Uint8Array(await response.arrayBuffer()));
-  const values = documentValues(employee, settings, eventType, f2OrderNumber, f2OrderDate, organizationProfileId);
+  const values = documentValues(employee, settings, eventType, f2OrderNumber, f2OrderDate, organizationProfileId, type);
   if (type !== "form10" && type !== "messageSheet") {
     const profile = settings.profiles[organizationProfileId];
     values.ORG_NAME = profile.organizationName || profile.workplaceName;
@@ -1041,6 +1093,14 @@ async function buildDocx(
   for (const [path, content] of Object.entries(archive)) {
     if (!path.startsWith("word/") || !path.endsWith(".xml")) continue;
     let xml = strFromU8(content);
+    if (type === "f2") {
+      if (values.HEADER_AUTHORITY_NAME.length > 55) {
+        xml = resizeDocxPlaceholderRun(xml, "HEADER_AUTHORITY_NAME", 22);
+      }
+      if (values.RESPONSIBLE_POSITION.length > 30) {
+        xml = resizeDocxPlaceholderRun(xml, "RESPONSIBLE_POSITION", 18);
+      }
+    }
     for (const [key, value] of Object.entries(values)) {
       xml = xml.replaceAll(`{{${key}}}`, xmlValue(value));
     }
@@ -1454,7 +1514,7 @@ export default function HomePage() {
     !usesWorkplaceName && !selectedOrganizationProfile.organizationAddress && "адрес организации",
     !selectedOrganizationProfile.responsiblePosition && "должность ответственного",
     !selectedOrganizationProfile.responsibleName && "Ф.И.О. ответственного",
-    !usesWorkplaceName && !selectedOrganizationProfile.headerAuthorityName && "наименование органа в шапке",
+    !usesWorkplaceName && documentType !== "f2" && !selectedOrganizationProfile.headerAuthorityName && "наименование органа в шапке",
   ].filter((value): value is string => Boolean(value));
   const documentParameterMissing = documentType === "f2" || documentType === "employmentNotice"
     ? [!f2OrderNumber.trim() && "номер приказа", !f2OrderDate && "дата приказа"].filter((value): value is string => Boolean(value))
