@@ -209,7 +209,7 @@ type Rule = {
 
 const STORAGE_KEY = "voinskiy-uchet-v1";
 const LAST_BACKUP_KEY = "voinskiy-uchet-last-backup";
-const APP_VERSION = "21.3";
+const APP_VERSION = "21.4";
 
 const ORGANIZATION_PROFILE_LABELS: Record<OrganizationProfileId, string> = {
   solar_sochi: "АО ЦА «Солярис» — Сочи",
@@ -1103,6 +1103,26 @@ async function buildDocx(
       xml = resizeDocxPlaceholderRun(xml, "HEADER_AUTHORITY_NAME", headerAuthorityHalfPoints);
       if (values.RESPONSIBLE_POSITION.length > 30) {
         xml = resizeDocxPlaceholderRun(xml, "RESPONSIBLE_POSITION", 18);
+      }
+    }
+    if (type === "messageSheet") {
+      const densityKeys: (keyof typeof values)[] = [
+        "LAST_NAME", "FIRST_NAME", "MIDDLE_NAME", "DEPARTMENT", "EDUCATION",
+        "ORG_NAME", "POSITION", "HEALTH_STATUS", "MARITAL_STATUS", "WIFE_DETAILS",
+        "CHILDREN_DETAILS", "MOTHER_DETAILS", "FATHER_DETAILS", "REGISTRATION_ADDRESS",
+      ];
+      const contentDensity = densityKeys.reduce((total, key) => total + values[key].length, 0);
+      const compactHalfPoints = contentDensity > 420
+        ? 18
+        : contentDensity > 300
+          ? 20
+          : contentDensity > 180
+            ? 22
+            : 24;
+      if (compactHalfPoints < 24) {
+        xml = xml
+          .replaceAll('<w:sz w:val="24"/>', `<w:sz w:val="${compactHalfPoints}"/>`)
+          .replaceAll('<w:szCs w:val="24"/>', `<w:szCs w:val="${compactHalfPoints}"/>`);
       }
     }
     for (const [key, value] of Object.entries(values)) {

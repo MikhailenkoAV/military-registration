@@ -110,6 +110,7 @@ async function generate(outputName, person, organization = settings, profileId =
   const bytes = new Uint8Array(await blob.arrayBuffer());
   const xml = strFromU8(unzipSync(bytes)["word/document.xml"]);
   assert.doesNotMatch(xml, /\{\{[A-Z0-9_]+\}\}/);
+  assert.equal((xml.match(/М\.П\./g) ?? []).length, 2, "Both M.P. labels must remain in the message sheet");
   const actual = context.documentValues(person, organization, "hire", "", "", profileId);
   for (const key of ["MARITAL_STATUS", "MOTHER_DETAILS", "FATHER_DETAILS", "WIFE_DETAILS", "CHILDREN_DETAILS"]) {
     if (actual[key]) assert.ok(xml.includes(context.xmlValue(actual[key])), `${key} missing from DOCX`);
@@ -120,6 +121,27 @@ async function generate(outputName, person, organization = settings, profileId =
 await generate("message-sheet-married.docx", married);
 await generate("message-sheet-single.docx", employee({ maritalStatus: "Не состоит в браке (не замужем / не женат)", familyMembers: parentRows }));
 await generate("message-sheet-divorced.docx", employee({ maritalStatus: "Разведён (разведена)", familyMembers: parentRows }));
+const denseSettings = context.defaultSettings();
+denseSettings.profiles.solar_moscow.workplaceName = "Акционерное общество Центр авиации «Солярис» Филиал АО ЦА «Солярис» (город Москва)";
+const denseFamilyRows = [
+  "Жена | Александрова-Романовская Екатерина Константиновна | 1984-11-19",
+  "Сын | Александров-Романовский Константин Владимирович | 2008-01-17",
+  "Дочь | Александрова-Романовская Елизавета Владимировна | 2011-06-24",
+  "Сын | Александров-Романовский Михаил Владимирович | 2015-09-02",
+].join("\n");
+await generate("message-sheet-dense.docx", employee({
+  fullName: "Александров-Романовский Владимир Константинович",
+  lastName: "Александров-Романовский",
+  firstName: "Владимир",
+  middleName: "Константинович",
+  department: "Управление организации лётной деятельности и производственного контроля",
+  position: "Ведущий инженер по техническому обслуживанию авиационной техники",
+  education: "высшее профессиональное, магистратура и профессиональная переподготовка",
+  healthStatus: "годен к военной службе с незначительными ограничениями",
+  maritalStatus: "Состоит в зарегистрированном браке (женат / замужем)",
+  familyMembers: denseFamilyRows,
+  registrationAddress: "Российская Федерация, Московская область, городской округ Воскресенск, улица Центральная, дом 125, корпус 3, квартира 147",
+}), denseSettings);
 
 const organizationOutput = path.join(root, "work/rendered-organization-profiles");
 fs.mkdirSync(organizationOutput, { recursive: true });

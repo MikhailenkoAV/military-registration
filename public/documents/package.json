@@ -1,0 +1,36 @@
+{
+  "name": "voinskiy-uchet",
+  "version": "0.1.0",
+  "private": true,
+  "engines": {
+    "node": ">=22.13.0"
+  },
+  "scripts": {
+    "dev": "next dev",
+    "embed:templates": "node scripts/embed-list-templates.mjs",
+    "build": "npm run embed:templates && next build",
+    "build:github": "npm run embed:templates && GITHUB_PAGES=true NEXT_PUBLIC_BASE_PATH=/military-registration next build",
+    "start": "next start",
+    "lint": "eslint . --ignore-pattern .next --ignore-pattern dist",
+    "test:documents": "node work/test_message_sheet.mjs",
+    "test": "npm run lint && npm run test:documents && npm run build"
+  },
+  "dependencies": {
+    "fflate": "^0.8.3",
+    "lucide-react": "^0.468.0",
+    "next": "16.2.6",
+    "react": "19.2.6",
+    "react-dom": "19.2.6",
+    "xlsx": "^0.18.5"
+  },
+  "devDependencies": {
+    "@types/node": "22.19.19",
+    "@types/react": "19.2.14",
+    "@types/react-dom": "19.2.3",
+    "eslint": "9.39.4",
+    "eslint-config-next": "16.2.6",
+    "typescript": "5.9.3"
+  },
+  "type": "module",
+  "displayName": "Воинский учет — рабочий контур"
+}
